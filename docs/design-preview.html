@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AudibleWeb — Design Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #1a1a1a;
+    --surface: #262626;
+    --surface-hover: #303030;
+    --surface-active: #383838;
+    --border: #3a3a3a;
+
+    --text: #e5e5e5;
+    --text-muted: #a3a3a3;
+    --text-disabled: #6b6b6b;
+
+    --accent: #3b82f6;
+    --accent-strong: #2563eb;
+    --accent-subtle: rgba(59, 130, 246, 0.12);
+
+    --success: #22c55e;
+    --success-subtle: rgba(34, 197, 94, 0.12);
+    --error: #ef4444;
+    --error-subtle: rgba(239, 68, 68, 0.12);
+    --warning: #f59e0b;
+    --warning-subtle: rgba(245, 158, 11, 0.12);
+
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 12px;
+    --space-base: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+    --space-2xl: 48px;
+
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-full: 999px;
+
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-elevated: 0 4px 12px rgba(0, 0, 0, 0.4);
+
+    --transition-fast: 120ms ease;
+    --transition-base: 200ms ease;
+    --transition-progress: 300ms ease-out;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.5;
+    padding: var(--space-2xl);
+  }
+
+  h1 { font-size: 24px; font-weight: 600; line-height: 1.3; margin: 0 0 var(--space-xs); }
+  h2 { font-size: 18px; font-weight: 600; line-height: 1.4; margin: var(--space-2xl) 0 var(--space-base); border-bottom: 1px solid var(--border); padding-bottom: var(--space-sm); }
+  .subtitle { color: var(--text-muted); margin: 0 0 var(--space-2xl); font-size: 13px; }
+  .mono { font-family: var(--font-mono); font-weight: 500; font-size: 13px; }
+  .meta { color: var(--text-muted); font-size: 13px; }
+
+  /* ---- Swatches ---- */
+  .swatch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: var(--space-base); }
+  .swatch { border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
+  .swatch-color { height: 56px; }
+  .swatch-label { padding: var(--space-sm) var(--space-md); font-size: 13px; }
+  .swatch-label .name { display: block; }
+  .swatch-label .hex { display: block; color: var(--text-muted); font-family: var(--font-mono); font-size: 12px; margin-top: 2px; }
+
+  /* ---- Type scale ---- */
+  .type-row { display: flex; align-items: baseline; gap: var(--space-lg); padding: var(--space-md) 0; border-bottom: 1px solid var(--border); }
+  .type-row:last-child { border-bottom: none; }
+  .type-row .label { width: 220px; flex-shrink: 0; color: var(--text-muted); font-size: 13px; font-family: var(--font-mono); }
+  .h1-sample { font-size: 24px; font-weight: 600; }
+  .h2-sample { font-size: 18px; font-weight: 600; }
+  .body-sample { font-size: 15px; font-weight: 400; }
+  .small-sample { font-size: 13px; color: var(--text-muted); }
+  .mono-sample { font-family: var(--font-mono); font-size: 13px; font-weight: 500; }
+
+  /* ---- Tab bar ---- */
+  .tab-bar { display: flex; gap: var(--space-xl); border-bottom: 1px solid var(--border); margin-bottom: var(--space-lg); }
+  .tab { padding: var(--space-md) var(--space-xs); color: var(--text-muted); font-weight: 500; border-bottom: 2px solid transparent; cursor: default; transition: color var(--transition-fast); }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+  /* ---- Quick add ---- */
+  .quick-add { display: flex; gap: var(--space-sm); margin-bottom: var(--space-lg); }
+  .quick-add input {
+    flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+    color: var(--text); font-family: var(--font-sans); font-size: 15px; padding: var(--space-md) var(--space-base);
+  }
+  .quick-add input:focus {
+    outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  }
+  .quick-add input::placeholder { color: var(--text-disabled); }
+  .btn {
+    background: var(--accent-strong); color: #fff; border: none; border-radius: var(--radius-md);
+    padding: var(--space-md) var(--space-lg); font-family: var(--font-sans); font-size: 15px; font-weight: 500;
+    cursor: pointer; transition: background var(--transition-fast);
+  }
+  .btn:hover { background: #1d4ed8; }
+
+  /* ---- Badges ---- */
+  .badge {
+    display: inline-flex; align-items: center; gap: var(--space-xs);
+    padding: var(--space-xs) var(--space-sm); border-radius: var(--radius-full);
+    font-size: 13px; font-weight: 500;
+  }
+  .badge svg { width: 14px; height: 14px; }
+  .badge-queued { background: var(--surface); color: var(--text-muted); }
+  .badge-progress { background: var(--accent-subtle); color: var(--accent); }
+  .badge-progress::before {
+    content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  .badge-done { background: var(--success-subtle); color: var(--success); }
+  .badge-failed { background: var(--error-subtle); color: var(--error); }
+  .badge-stalled { background: var(--warning-subtle); color: var(--warning); }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  @media (prefers-reduced-motion: reduce) {
+    .badge-progress::before { animation: none; }
+  }
+  .badge-row { display: flex; gap: var(--space-sm); flex-wrap: wrap; margin-bottom: var(--space-base); }
+
+  /* ---- Job cards ---- */
+  .job-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: var(--space-lg); margin-bottom: var(--space-base);
+  }
+  .job-card.elevated { box-shadow: var(--shadow-elevated); }
+  .job-card.compact { box-shadow: var(--shadow-card); padding: var(--space-base); }
+  .job-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-base); margin-bottom: var(--space-sm); }
+  .job-title { font-weight: 600; font-size: 15px; }
+  .job-stage { color: var(--accent); font-size: 13px; margin-bottom: var(--space-sm); }
+
+  /* ---- Progress bar ---- */
+  .progress-track { background: var(--bg); border-radius: var(--radius-full); height: 6px; overflow: hidden; margin-bottom: var(--space-sm); }
+  .progress-fill { background: var(--accent); height: 100%; border-radius: var(--radius-full); transition: width var(--transition-progress); }
+  .progress-meta { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-muted); }
+
+  /* ---- Compact row ---- */
+  .compact-top { display: flex; justify-content: space-between; align-items: center; gap: var(--space-base); }
+  .compact-actions { display: flex; gap: var(--space-sm); color: var(--text-muted); }
+  .compact-actions svg { width: 18px; height: 18px; cursor: pointer; }
+  .compact-actions svg:hover { color: var(--text); }
+
+  /* ---- Radius / shadow reference ---- */
+  .ref-grid { display: flex; gap: var(--space-lg); flex-wrap: wrap; }
+  .ref-box { width: 100px; height: 60px; background: var(--surface); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+</style>
+</head>
+<body>
+
+<h1>AudibleWeb — Design Preview</h1>
+<p class="subtitle">Token reference + component showcase for DESIGN.md. Dark theme only.</p>
+
+<h2>Color tokens</h2>
+<div class="swatch-grid">
+  <div class="swatch"><div class="swatch-color" style="background: var(--bg)"></div><div class="swatch-label"><span class="name">bg</span><span class="hex">#1a1a1a</span></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: var(--surface)"></div><div class="swatch-label"><span class="name">surface</span><span class="hex">#262626</span></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: var(--surface-hover)"></div><div class="swatch-label"><span class="name">surface-hover</span><span class="hex">#303030</span></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: var(--surface-active)"></div><div class="swatch-label"><span class="name">surface-active</span><span class="hex">#383838</span></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: var(--border)"></div><div class="swatch-label"><span class="name">border</span><span class="hex">#3a3a3a</span></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: var(--text)"></div><div class="swatch-label"><span class="name">text</span><span class="hex">#e5e5e5</span></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: var(--text-muted)"></div><div class="swatch-label"><span class="name">text-muted</span><span class="hex">#a3a3a3</span></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: var(--accent)"></div><div class="swatch-label"><span class="name">accent</span><span class="hex">#3b82f6</span></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: var(--accent-strong)"></div><div class="swatch-label"><span class="name">accent-strong</span><span class="hex">#2563eb</span></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: var(--success)"></div><div class="swatch-label"><span class="name">success</span><span class="hex">#22c55e</span></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: var(--error)"></div><div class="swatch-label"><span class="name">error</span><span class="hex">#ef4444</span></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: var(--warning)"></div><div class="swatch-label"><span class="name">warning</span><span class="hex">#f59e0b</span></div></div>
+</div>
+
+<h2>Typography</h2>
+<div class="type-row"><span class="label">h1 / Inter 600 / 24px</span><span class="h1-sample">Your Reading Feed</span></div>
+<div class="type-row"><span class="label">h2 / Inter 600 / 18px</span><span class="h2-sample">Queue</span></div>
+<div class="type-row"><span class="label">body / Inter 400 / 15px</span><span class="body-sample">Paste a URL above to create your first episode.</span></div>
+<div class="type-row"><span class="label">small / Inter 400 / 13px</span><span class="small-sample">Added 2 minutes ago</span></div>
+<div class="type-row"><span class="label">mono / JetBrains Mono 500 / 13px</span><span class="mono-sample">12 / 47 chunks · 18.4 MB · 24:11</span></div>
+
+<h2>Tab bar</h2>
+<nav class="tab-bar">
+  <div class="tab">Inbox</div>
+  <div class="tab active">Queue</div>
+  <div class="tab">Feed</div>
+  <div class="tab">Settings</div>
+</nav>
+
+<h2>Quick-add input</h2>
+<div class="quick-add">
+  <input type="text" placeholder="Paste a URL, or drop a PDF/TXT/MD file..." />
+  <button class="btn">Add</button>
+</div>
+
+<h2>Status badges</h2>
+<div class="badge-row">
+  <span class="badge badge-queued">Queued</span>
+  <span class="badge badge-progress">Generating audio</span>
+  <span class="badge badge-done">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+    Done
+  </span>
+  <span class="badge badge-failed">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+    Failed
+  </span>
+  <span class="badge badge-stalled">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    Stalled
+  </span>
+</div>
+
+<h2>Job cards — Queue tab</h2>
+
+<div class="job-card elevated">
+  <div class="job-card-top">
+    <div>
+      <div class="job-title">The Future of Local-First Software</div>
+      <div class="job-stage">Generating audio 12/47...</div>
+    </div>
+    <span class="badge badge-progress">Generating</span>
+  </div>
+  <div class="progress-track"><div class="progress-fill" style="width: 26%"></div></div>
+  <div class="progress-meta">
+    <span class="mono">Elapsed 1:42</span>
+    <span class="mono">~4:50 remaining</span>
+  </div>
+</div>
+
+<div class="job-card compact">
+  <div class="compact-top">
+    <div>
+      <div class="job-title">Why Plain Text Wins</div>
+      <span class="meta mono">24:11 · 18.4 MB</span>
+    </div>
+    <div style="display:flex; align-items:center; gap: var(--space-md);">
+      <span class="badge badge-done">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        Done
+      </span>
+      <div class="compact-actions">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="job-card compact">
+  <div class="compact-top">
+    <div>
+      <div class="job-title">Notes on a Decade of Indie Hacking</div>
+      <span class="meta mono">Failed at chunk 8/32</span>
+    </div>
+    <div style="display:flex; align-items:center; gap: var(--space-md);">
+      <span class="badge badge-failed">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+        Failed
+      </span>
+      <div class="compact-actions">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2>Radius scale</h2>
+<div class="ref-grid">
+  <div class="ref-box" style="border-radius: var(--radius-sm)">sm · 4px</div>
+  <div class="ref-box" style="border-radius: var(--radius-md)">md · 8px</div>
+  <div class="ref-box" style="border-radius: var(--radius-lg)">lg · 12px</div>
+  <div class="ref-box" style="border-radius: var(--radius-full)">full</div>
+</div>
+
+</body>
+</html>
