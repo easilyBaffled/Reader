@@ -82,3 +82,51 @@ tests/test_app.py (start_worker flags + new test).
 
 Unblocks: reader-8f2.10 (final wiring) can now build on Worker/run_pipeline;
 reader-ebs (async-arch doc) can reference this implementation.
+
+---
+
+### Iteration: reader-8f2.2 [build-4] chunking + kokoro_text_normalization scope decision (closed)
+Built `audibleweb/lib/chunking.py` (`chunk_text(text, level: "paragraph"|"sentence")
+-> list[str]`) + `tests/test_chunking.py` (5 tests). Adapted from abogen's
+core/chunking.py::chunk_text, stripped per acceptance criteria: no
+chapter_index/speaker_id/voice_profile/voice_formula/build_chunks_for_chapters
+(single-voice, no chapters per D10).
+
+**Decision (kokoro_text_normalization.py scope, the open question):** NOT vendored
+as part of chunking, and chunk_text does NOT call normalize_for_pipeline at all.
+- AudibleWeb's pipeline order is extract->clean->normalize->pronunciation->chunk
+  (design.md sec 3) — normalization happens upstream on the full text, so
+  chunking is pure structural paragraph/sentence splitting on already-normalized
+  text. Dropped abogen's normalized_text/display_text/original_text dual-tracking
+  entirely (that existed only because abogen normalizes per-chunk, post-split).
+- The bulk of kokoro_text_normalization.py (~2300 lines: dates/times/numbers/
+  currency/roman-numerals/contractions/internet-slang/address-abbrev/acronyms/
+  titles) is engine-agnostic "make raw text speakable" normalization, despite the
+  filename. It's the rule-based default impl for pipeline/normalize.py
+  (reader-8f2.12), as `lib/text_normalization.py`, slimmed: drop abogen's
+  runtime-settings/cache layer (normalization_settings.py) in favor of
+  config.yaml keys, and drop its narrow LLM-contraction sub-path (mode=="llm")
+  — AudibleWeb's broader Stage-2 LLM rewrite (design.md sec 3) supersedes it.
+  Always-on rule-based normalization runs regardless of whether the optional
+  LLM stage is configured (matches "LLM normalization gracefully degrades" key
+  decision).
+- `apply_phoneme_hints` (IPA/misaki sibilant-iz markers, ~6 lines) IS genuinely
+  Kokoro-specific — relocate to engines/kokoro.py as a pre-synthesis step
+  (reader-8f2.4), not part of the shared pipeline.
+- Recorded in reader-8f2.2 notes (`bd show reader-8f2.2`) so reader-8f2.12 doesn't
+  re-derive this.
+
+Files: audibleweb/lib/__init__.py (new), audibleweb/lib/chunking.py (new),
+tests/test_chunking.py (new), .pocock/archive.md (new — moved oldest entry here).
+
+Unblocks: reader-8f2.12 (normalize.py) has its scope/placement decided;
+reader-8f2.4 (kokoro engine) has apply_phoneme_hints placement decided;
+reader-8f2.10 (final wiring) — chunking dep satisfied.
+
+**reader-8f2.4 revisited this call (see current iteration):** `apply_phoneme_hints`
+turned out to be `text.replace(iz_marker, " iz")` -- a pure string substitution
+with no TTS-client/voice dependency. Its only producer is `‹IZ›` markers inserted
+by abogen's `normalize_apostrophes` (part of the not-yet-vendored
+lib/text_normalization.py). Re-scoped to reader-8f2.12 as a final text-pipeline
+step (end of normalize.py), NOT engines/kokoro.py -- avoids a dead/no-op stub in
+kokoro.py until the marker-producing side exists.
