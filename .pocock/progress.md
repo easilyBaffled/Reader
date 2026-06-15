@@ -10,6 +10,41 @@ This file maintains context between autonomous iterations.
 <!-- This section is a rolling window - keep only the last 3 entries -->
 <!-- Move older entries to archive.md -->
 
+### Iteration: reader-tt4 [eng-T1] lib/voice.py voice spec parsing + weighted mix (closed)
+Built `audibleweb/lib/voice.py` (`parse_voice_spec`, `VoiceSpec`/`VoiceWeight`
+dataclasses, `InvalidVoiceSpecError`, `mix_weighted_blend`) + `tests/test_voice.py`
+(14 tests). Added `pydub` dep (`uv add pydub`, 0.25.1) — ffmpeg already on PATH
+(/opt/homebrew/bin/ffmpeg), pydub uses it for WAV export/overlay.
+
+Key decisions:
+- Combined audiobook-creator's `parse_voice_string` + `validate_voice_string`
+  into ONE `parse_voice_spec()` that validates first and RAISES
+  `InvalidVoiceSpecError` (subclass of ValueError) on invalid input, returning
+  a `VoiceSpec` dataclass (not a dict) on success — matches project convention
+  (Article/Extractor dataclasses in extractors/base.py) and acceptance
+  criteria's "raises clear error on invalid spec".
+- `mix_weighted_blend(buffer_a, weight_a, buffer_b, weight_b) -> bytes` is the
+  SPLIT half (D1): pure bytes-in/bytes-out, no asyncio/TTS client. Dropped
+  audiobook-creator's `generate_weighted_mix` entirely (it called
+  `generate_audio_with_retry` + did concurrent TTS gather) — that TTS-calling
+  responsibility belongs to engines/kokoro.py (reader-8f2.4), which will call
+  this mix function with the two already-generated WAV buffers. No
+  pytest-asyncio needed since this module has zero async code.
+- Kept exactly-2-voices signature for mix_weighted_blend (matches the
+  weighted-blend validation rule: max 2 voices) rather than a generic
+  list[bytes]/list[float] — simpler, no premature generality.
+- Known pre-existing edge case carried over unchanged: validation allows an
+  individual weight of 0.0 (since 0<=weight<=1 and e.g. "a:1.0+b:0.0" sums to
+  1.0), but `_adjust_volume_by_weight` raises ValueError for weight<=0. Same
+  inconsistency existed in audiobook-creator source; not fixed here (out of
+  scope, no spec'd behavior for weight=0 — flag if reader-8f2.4 hits it).
+
+Files: audibleweb/lib/voice.py (new), tests/test_voice.py (new, 14 tests),
+pyproject.toml + uv.lock (+pydub).
+
+Unblocks: reader-8f2.4 (engines/kokoro.py) can import parse_voice_spec +
+mix_weighted_blend for blend resolution.
+
 ### Iteration: reader-8f2.3 [build-5] extractors/base.py + raw_text.py + file.py (closed)
 Built `audibleweb/extractors/{base,raw_text,file}.py` + `tests/test_extractors.py`
 (21 tests).
@@ -83,39 +118,6 @@ Unblocks: reader-8f2.12 (normalize.py) has its scope/placement decided;
 reader-8f2.4 (kokoro engine) has apply_phoneme_hints placement decided;
 reader-8f2.10 (final wiring) — chunking dep satisfied.
 
-### Iteration: reader-z4v [eng-T3] background worker thread (closed)
-Built `audibleweb/worker.py` (Worker: daemon thread + own asyncio event loop,
-polls `jobs` for status='queued' one at a time, `start()`/`stop()` w/ graceful
-shutdown) + `audibleweb/core/pipeline.py` (stub `run_pipeline(conn, job_id)` ->
-sets status='done'). Wired into `create_app(start_worker=True default)` via
-`app.extensions["worker"]` + `atexit.register(worker.stop)`.
-
-Key decisions:
-- Created `audibleweb/core/` package — this is the design.md sec 11
-  orchestration package (pipeline.py, later job_queue.py/text_pipeline.py/
-  feed.py), NOT the vendored-utils location. Confirms D2: vendored
-  voice/cleaning/chunking code still goes in `lib/`, no collision.
-- Added `PRAGMA busy_timeout = 5000` to db.py's get_connection — worker
-  thread + Flask routes now hold separate connections to the same SQLite
-  file; writers wait instead of raising "database is locked" on collision.
-  Skipped WAL (avoids extra -wal/-shm files for v1).
-- Worker.stop() must tolerate being called twice (atexit + manual in tests) —
-  asyncio.run() closes the loop after _main() returns, so stop() checks
-  `loop.is_closed()` before call_soon_threadsafe.
-- core/pipeline.run_pipeline is the extension point for real
-  extract->normalize->generate->publish stages (later build tasks, esp.
-  reader-8f2.10). Currently just flips queued->done.
-- Existing test_app.py tests pass `start_worker=False` (worker not under
-  test there); added test_create_app_starts_worker for the wiring itself.
-
-Files: audibleweb/worker.py (new), audibleweb/core/__init__.py (new),
-audibleweb/core/pipeline.py (new), audibleweb/db.py (busy_timeout),
-audibleweb/app.py (Worker wiring), tests/test_worker.py (new),
-tests/test_app.py (start_worker flags + new test).
-
-Unblocks: reader-8f2.10 (final wiring) can now build on Worker/run_pipeline;
-reader-ebs (async-arch doc) can reference this implementation.
-
 ---
 
 ## Active Roadblocks
@@ -150,11 +152,17 @@ Patterns, gotchas, and decisions that affect future work:
   `uv add pymupdf` — that pattern (uv add updates pyproject.toml + uv.lock
   together) works fine for adding new extractor/engine deps going forward
   (trafilatura/httpx/feedparser for 8f2.14/8f2.15).
+- `audibleweb/lib/voice.py` (reader-tt4) is ready for reader-8f2.4 (kokoro
+  engine): `parse_voice_spec(str) -> VoiceSpec` (raises `InvalidVoiceSpecError`)
+  + `mix_weighted_blend(buffer_a, weight_a, buffer_b, weight_b) -> bytes`. Added
+  `pydub` dep (`uv add pydub`); ffmpeg already on PATH so pydub WAV export/overlay
+  works out of the box.
 
 ### Vendoring sources (local paths, confirmed to exist)
-- `/Users/Daniel.Michaelis/audiobook-creator/utils/{voice_parser.py,audio_mixer.py,
-  run_shell_commands.py}` + matching `tests/` — source for reader-tt4 (lib/voice.py)
-  and reader-8f2.5 (pipeline/stitch.py ffmpeg helpers).
+- `/Users/Daniel.Michaelis/audiobook-creator/utils/run_shell_commands.py` +
+  matching `tests/` — source for reader-8f2.5 (pipeline/stitch.py ffmpeg
+  helpers). (voice_parser.py/audio_mixer.py already vendored — see reader-tt4
+  closed iteration above.)
 - `/Users/Daniel.Michaelis/abogen/abogen/chunking.py` — source for reader-8f2.2
   (done — see closed iteration above).
 - `/Users/Daniel.Michaelis/abogen/abogen/{kokoro_text_normalization.py,
