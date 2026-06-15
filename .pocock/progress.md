@@ -10,41 +10,6 @@ This file maintains context between autonomous iterations.
 <!-- This section is a rolling window - keep only the last 3 entries -->
 <!-- Move older entries to archive.md -->
 
-### Iteration: reader-tt4 [eng-T1] lib/voice.py voice spec parsing + weighted mix (closed)
-Built `audibleweb/lib/voice.py` (`parse_voice_spec`, `VoiceSpec`/`VoiceWeight`
-dataclasses, `InvalidVoiceSpecError`, `mix_weighted_blend`) + `tests/test_voice.py`
-(14 tests). Added `pydub` dep (`uv add pydub`, 0.25.1) — ffmpeg already on PATH
-(/opt/homebrew/bin/ffmpeg), pydub uses it for WAV export/overlay.
-
-Key decisions:
-- Combined audiobook-creator's `parse_voice_string` + `validate_voice_string`
-  into ONE `parse_voice_spec()` that validates first and RAISES
-  `InvalidVoiceSpecError` (subclass of ValueError) on invalid input, returning
-  a `VoiceSpec` dataclass (not a dict) on success — matches project convention
-  (Article/Extractor dataclasses in extractors/base.py) and acceptance
-  criteria's "raises clear error on invalid spec".
-- `mix_weighted_blend(buffer_a, weight_a, buffer_b, weight_b) -> bytes` is the
-  SPLIT half (D1): pure bytes-in/bytes-out, no asyncio/TTS client. Dropped
-  audiobook-creator's `generate_weighted_mix` entirely (it called
-  `generate_audio_with_retry` + did concurrent TTS gather) — that TTS-calling
-  responsibility belongs to engines/kokoro.py (reader-8f2.4), which will call
-  this mix function with the two already-generated WAV buffers. No
-  pytest-asyncio needed since this module has zero async code.
-- Kept exactly-2-voices signature for mix_weighted_blend (matches the
-  weighted-blend validation rule: max 2 voices) rather than a generic
-  list[bytes]/list[float] — simpler, no premature generality.
-- Known pre-existing edge case carried over unchanged: validation allows an
-  individual weight of 0.0 (since 0<=weight<=1 and e.g. "a:1.0+b:0.0" sums to
-  1.0), but `_adjust_volume_by_weight` raises ValueError for weight<=0. Same
-  inconsistency existed in audiobook-creator source; not fixed here (out of
-  scope, no spec'd behavior for weight=0 — flag if reader-8f2.4 hits it).
-
-Files: audibleweb/lib/voice.py (new), tests/test_voice.py (new, 14 tests),
-pyproject.toml + uv.lock (+pydub).
-
-Unblocks: reader-8f2.4 (engines/kokoro.py) can import parse_voice_spec +
-mix_weighted_blend for blend resolution.
-
 ### Iteration: reader-8f2.3 [build-5] extractors/base.py + raw_text.py + file.py (closed)
 Built `audibleweb/extractors/{base,raw_text,file}.py` + `tests/test_extractors.py`
 (21 tests).
@@ -133,6 +98,70 @@ ready to import. reader-yau (WAV header validation) and reader-n19
 (pause/weighted-blend fallback) can now reference `_generate_with_retry` /
 `synthesize`'s shape.
 
+### Iteration: reader-8f2.6 [build-8] publishers/{base,local,github_pages}.py + core/feed.py (closed)
+Built `audibleweb/publishers/{__init__,base,local,github_pages}.py` +
+`audibleweb/core/feed.py` + `tests/test_feed.py` (10 tests) +
+`tests/test_publishers.py` (12 tests). 81 total now. No new deps.
+
+Key decisions:
+- `publishers/base.py` is the shared core abstraction (like extractors/base.py
+  and engines/base.py): `Publisher` Protocol (`publish(episode, audio_path) ->
+  str`, `update_feed(episodes) -> str`, signatures verbatim from design.md sec
+  2.3) + `Episode` dataclass + `episode_slug(title, published)` helper
+  ("YYYY-MM-DD-sanitized-title", falls back to just the date if title has no
+  alnum chars). `Episode` fields are exactly what feed.xml's <item> needs
+  (title, published, duration_sec, source_url, public_url, file_size_bytes) —
+  `public_url`/`file_size_bytes` default to ""/0 and are expected to be filled
+  in by the caller (future reader-8f2.10 queue wiring) from `publish()`'s
+  return value + the stitched MP3's file size before `update_feed()` is called.
+- `core/feed.py` (per design.md sec 11 project structure) holds
+  `FeedConfig` dataclass + `generate_feed(episodes, config) -> str` (RSS 2.0 +
+  itunes namespace via `ET.register_namespace`, sorted newest-first, RFC822
+  `pubDate` via `email.utils.format_datetime(..., usegmt=True)`) +
+  `validate_feed(xml) -> None` (raises `FeedValidationError`). Both
+  `publishers/local.py` and `publishers/github_pages.py` import from here —
+  avoids duplicating feed-gen between the two publishers.
+- `validate_feed` is STRUCTURAL validation only (well-formed XML + required
+  <rss version="2.0">/<channel> elements + each <item> has
+  title/enclosure(url,length,type)/guid/pubDate/description/itunes:duration) —
+  not a full RSS XSD. No new dep (feedgen/lxml) added; ElementTree +
+  hand-rolled checks satisfy "Validates against RSS 2.0 + iTunes podcast spec
+  before push" (sec 6/9) without pulling in an external schema file or network
+  fetch. Flag if a future issue needs stricter XSD validation.
+- `GitHubPagesPublisher`: maintains ONE shallow clone of `gh-pages` in
+  `work_dir` for the publisher's lifetime (`_ensure_clone` checks `.git`
+  exists, no re-clone). `publish()` and `update_feed()` each independently
+  `git add -A` + commit + `push --force origin <branch>` (force per sec 9:
+  "gh-pages is generated content") — `_commit_and_push` no-ops (skips
+  commit+push) if `git status --porcelain` is empty, so calling
+  `update_feed()` twice with unchanged episodes doesn't error on "nothing to
+  commit". Git ops via `asyncio.create_subprocess_exec("git", *args, ...)` —
+  argv list (no shell), so no injection risk. Errors raise
+  `GitHubPagesPublisherError` with the PAT redacted from any git stderr
+  (`_redact`).
+- Auth: `remote_url` defaults to `https://{token}@github.com/{repo}.git` but
+  is constructor-overridable — tests pass a local bare-repo path as
+  `remote_url` (no live network, per CLAUDE.md testing). Known limitation
+  (documented in github_pages.py docstring, not handled): the `gh-pages`
+  branch must already exist on the remote; bootstrapping a brand-new branch is
+  a manual one-time setup step, out of scope here.
+- `LocalPublisher` is plain file I/O (shutil.copy2 into `data_dir/audio/`,
+  write `feed.xml` into `data_dir/`) — no git, matches "(no git)" in
+  acceptance criteria.
+- config.py (reader-8f2.9) is still open, so both publisher constructors take
+  explicit args (repo/token/work_dir/branch/feed_config for github_pages;
+  data_dir/base_url/feed_config for local) — same pattern as KokoroEngine
+  (reader-8f2.4). reader-8f2.9 just needs to read config.yaml's `publisher:`
+  block + `.env`'s GitHub PAT and pass them through.
+
+Files: audibleweb/publishers/{__init__,base,local,github_pages}.py (new),
+audibleweb/core/feed.py (new), tests/test_feed.py (new, 10 tests),
+tests/test_publishers.py (new, 12 tests).
+
+Unblocks: reader-8f2.10 (queue wiring), reader-fco (episode rotation), reader-ksd
+(atomic single-push) — Publisher Protocol + Episode + both publishers + feed
+gen/validation ready to import.
+
 ---
 
 ## Active Roadblocks
@@ -181,6 +210,16 @@ Patterns, gotchas, and decisions that affect future work:
   — mock TTS in tests via `httpx.MockTransport`, no real server needed
   (tests/test_kokoro.py pattern). `apply_phoneme_hints` is NOT in kokoro.py —
   re-scoped to reader-8f2.12 (normalize.py), see that section + archive.md.
+- `audibleweb/publishers/{base,local,github_pages}.py` + `audibleweb/core/feed.py`
+  (reader-8f2.6) ready for reader-8f2.10 (queue wiring): `Publisher` Protocol +
+  `Episode` dataclass + `episode_slug()` in publishers/base.py;
+  `FeedConfig`/`generate_feed()`/`validate_feed()` in core/feed.py;
+  `LocalPublisher(data_dir, base_url, feed_config)` and
+  `GitHubPagesPublisher(repo, token, work_dir, branch=, feed_config=,
+  remote_url=)`. Caller fills `Episode.public_url`/`file_size_bytes` from
+  `publish()`'s return + the MP3's `stat().st_size` before calling
+  `update_feed()`. Test gh-pages pushes against a local bare repo
+  (`git init --bare -b gh-pages`) via `remote_url=` override — no live network.
 
 ### Vendoring sources (local paths, confirmed to exist)
 - `/Users/Daniel.Michaelis/audiobook-creator/utils/run_shell_commands.py` +

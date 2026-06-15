@@ -130,3 +130,38 @@ by abogen's `normalize_apostrophes` (part of the not-yet-vendored
 lib/text_normalization.py). Re-scoped to reader-8f2.12 as a final text-pipeline
 step (end of normalize.py), NOT engines/kokoro.py -- avoids a dead/no-op stub in
 kokoro.py until the marker-producing side exists.
+
+### Iteration: reader-tt4 [eng-T1] lib/voice.py voice spec parsing + weighted mix (closed)
+Built `audibleweb/lib/voice.py` (`parse_voice_spec`, `VoiceSpec`/`VoiceWeight`
+dataclasses, `InvalidVoiceSpecError`, `mix_weighted_blend`) + `tests/test_voice.py`
+(14 tests). Added `pydub` dep (`uv add pydub`, 0.25.1) — ffmpeg already on PATH
+(/opt/homebrew/bin/ffmpeg), pydub uses it for WAV export/overlay.
+
+Key decisions:
+- Combined audiobook-creator's `parse_voice_string` + `validate_voice_string`
+  into ONE `parse_voice_spec()` that validates first and RAISES
+  `InvalidVoiceSpecError` (subclass of ValueError) on invalid input, returning
+  a `VoiceSpec` dataclass (not a dict) on success — matches project convention
+  (Article/Extractor dataclasses in extractors/base.py) and acceptance
+  criteria's "raises clear error on invalid spec".
+- `mix_weighted_blend(buffer_a, weight_a, buffer_b, weight_b) -> bytes` is the
+  SPLIT half (D1): pure bytes-in/bytes-out, no asyncio/TTS client. Dropped
+  audiobook-creator's `generate_weighted_mix` entirely (it called
+  `generate_audio_with_retry` + did concurrent TTS gather) — that TTS-calling
+  responsibility belongs to engines/kokoro.py (reader-8f2.4), which will call
+  this mix function with the two already-generated WAV buffers. No
+  pytest-asyncio needed since this module has zero async code.
+- Kept exactly-2-voices signature for mix_weighted_blend (matches the
+  weighted-blend validation rule: max 2 voices) rather than a generic
+  list[bytes]/list[float] — simpler, no premature generality.
+- Known pre-existing edge case carried over unchanged: validation allows an
+  individual weight of 0.0 (since 0<=weight<=1 and e.g. "a:1.0+b:0.0" sums to
+  1.0), but `_adjust_volume_by_weight` raises ValueError for weight<=0. Same
+  inconsistency existed in audiobook-creator source; not fixed here (out of
+  scope, no spec'd behavior for weight=0 — flag if reader-8f2.4 hits it).
+
+Files: audibleweb/lib/voice.py (new), tests/test_voice.py (new, 14 tests),
+pyproject.toml + uv.lock (+pydub).
+
+Unblocks: reader-8f2.4 (engines/kokoro.py) can import parse_voice_spec +
+mix_weighted_blend for blend resolution.
