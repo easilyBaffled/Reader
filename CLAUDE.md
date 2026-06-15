@@ -26,6 +26,28 @@ uv run ruff check .                # lint
 uv run ruff format .               # format
 ```
 
+## Task Tracking
+
+This project uses **beads** (`bd`) for distributed issue tracking.
+
+```bash
+bd ready              # Find available work
+bd show <id>          # View issue details
+bd update <id> --status in_progress  # Claim work
+bd close <id>         # Complete work
+bd export             # Flush database to JSONL for git
+```
+
+## Autonomous Loop
+
+`.pocock/` contains an autonomous coding loop. See `.pocock/README.md`.
+
+```bash
+./.pocock/once.sh                    # Single iteration
+./.pocock/loop.sh 10                 # 10 iterations
+./.pocock/loop.sh 5 --epic reader-xyz  # Scoped to epic
+```
+
 ## Architecture
 
 Plugin-based with Python Protocols:

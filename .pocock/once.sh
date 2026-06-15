@@ -60,4 +60,5 @@ echo "Starting Pocock iteration..."
 echo "Issues: $BD_CMD"
 echo ""
 
-claude --dangerously-skip-permissions "$PROMPT"
+CLAUDE_CODE_USE_BEDROCK=0 AWS_PROFILE="" ANTHROPIC_MODEL="" ANTHROPIC_SMALL_FAST_MODEL="" \
+  claude --settings ~/.claude/settings.personal.json --dangerously-skip-permissions "$PROMPT"

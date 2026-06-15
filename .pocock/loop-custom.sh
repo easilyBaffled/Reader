@@ -80,7 +80,8 @@ $(cat .pocock/progress.md)
 $(cat "$PROMPT_FILE")"
 
     # Run Claude and capture output
-    OUTPUT=$(claude --dangerously-skip-permissions "$PROMPT" 2>&1) || true
+    OUTPUT=$(CLAUDE_CODE_USE_BEDROCK=0 AWS_PROFILE="" ANTHROPIC_MODEL="" ANTHROPIC_SMALL_FAST_MODEL="" \
+      claude --settings ~/.claude/settings.personal.json --dangerously-skip-permissions "$PROMPT" 2>&1) || true
     EXIT_CODE=$?
     echo "$OUTPUT"
 
