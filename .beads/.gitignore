@@ -2,6 +2,9 @@
 dolt/
 dolt-access.lock
 
+# Credential encryption key (local secret, must never be tracked)
+.beads-credential-key
+
 # Runtime files
 bd.sock
 bd.sock.startlock
