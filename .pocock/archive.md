@@ -200,3 +200,56 @@ tests/test_extractors.py (new, 21 tests), pyproject.toml + uv.lock (+pymupdf).
 
 Unblocks: reader-8f2.14 (web.py) and reader-8f2.15 (rss.py) have base.py +
 shared ExtractionError/make_article ready to import.
+
+### Iteration: reader-8f2.4 [build-6] engines/base.py + engines/kokoro.py (closed)
+Built `audibleweb/engines/{base,kokoro}.py` + `tests/test_kokoro.py` (10 tests,
+58 total now). Added `httpx` dep (`uv add httpx`, 0.28.1) for async HTTP to the
+Kokoro OpenAI-compatible `/v1` endpoint.
+
+Key decisions:
+- `TTSEngine.synthesize(text, voice, speed) -> bytes` (raw WAV), NOT
+  design.md sec 2.2's `AudioSegment` — keeps the bytes-in/bytes-out contract
+  lib/voice.py's `mix_weighted_blend` already established (reader-tt4), and
+  lets pipeline/stitch.py (reader-8f2.5) write chunks straight to temp files
+  for FFmpeg concat without pydub in the stitching path (CLAUDE.md: "FFmpeg
+  for stitching, not PyDub"). Documented as an intentional deviation in
+  engines/base.py's docstring.
+- `list_voices() -> list[str]`, NOT `list[Voice]` — Kokoro's `/audio/voices`
+  returns `{"voices": [...]}` (flat strings); no `Voice` dataclass needed
+  until a second engine justifies one (YAGNI). Also documented in base.py.
+- `_generate_with_retry` (D8): one shared retry/backoff helper used for (a) a
+  native voice/blend (1 call, native_string passed straight through to the
+  API) and (b) each leg of a weighted blend (2 calls), whose results
+  `lib.voice.mix_weighted_blend` then mixes. Retry params match
+  audiobook-creator's contract exactly (4 total attempts, 0.1/0.2/0.4s
+  backoff + 0-10% jitter, no error discrimination — any exception retried).
+- Timeout = 120s/chunk (docs/design.md sec 9's "TTS | Timeout (120s/chunk) |
+  Count as failure, retry"), NOT audiobook-creator's vendored 600s — a
+  deliberate AudibleWeb-specific value, not carried over from the source.
+- Semaphore (`asyncio.Semaphore(max_parallel)`) lives inside
+  `_generate_with_retry` itself, so it bounds the actual concurrent
+  `/audio/speech` calls regardless of caller — a weighted blend's 2 legs each
+  acquire a slot independently. `max_parallel` is a plain constructor int
+  (config.yaml `tts.max_parallel`, default 4) — config.py (reader-8f2.9) just
+  needs to read the value and pass it in; no coupling added here.
+- Used `httpx.AsyncClient` + `httpx.MockTransport` directly (no `openai` SDK
+  dep) — `/audio/voices` isn't part of the OpenAI schema, so httpx covers both
+  endpoints with one dependency and makes the "mock TTS server fixture" trivial
+  (no real server/port needed, just a request handler returning silence WAV /
+  a voices JSON body). `KokoroEngine(..., client=...)` accepts an injected
+  client for this.
+- **Resolved reader-8f2.2's open `apply_phoneme_hints` placement question**:
+  it's `text.replace(iz_marker, " iz")` — pure string substitution, no
+  TTS-client/voice dependency. Its only producer (`‹IZ›` markers from abogen's
+  `normalize_apostrophes`) doesn't exist yet (part of not-yet-vendored
+  lib/text_normalization.py). Re-scoped to reader-8f2.12 as a final
+  text-pipeline step in normalize.py, NOT engines/kokoro.py — avoids a dead
+  no-op stub here. See archive.md for the fuller note.
+
+Files: audibleweb/engines/{__init__,base,kokoro}.py (new),
+tests/test_kokoro.py (new, 10 tests), pyproject.toml + uv.lock (+httpx).
+
+Unblocks: reader-8f2.10 (queue.py wiring) — TTSEngine Protocol + KokoroEngine
+ready to import. reader-yau (WAV header validation) and reader-n19
+(pause/weighted-blend fallback) can now reference `_generate_with_retry` /
+`synthesize`'s shape.
