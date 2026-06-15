@@ -10,6 +10,44 @@ This file maintains context between autonomous iterations.
 <!-- This section is a rolling window - keep only the last 3 entries -->
 <!-- Move older entries to archive.md -->
 
+### Iteration: reader-8f2.2 [build-4] chunking + kokoro_text_normalization scope decision (closed)
+Built `audibleweb/lib/chunking.py` (`chunk_text(text, level: "paragraph"|"sentence")
+-> list[str]`) + `tests/test_chunking.py` (5 tests). Adapted from abogen's
+core/chunking.py::chunk_text, stripped per acceptance criteria: no
+chapter_index/speaker_id/voice_profile/voice_formula/build_chunks_for_chapters
+(single-voice, no chapters per D10).
+
+**Decision (kokoro_text_normalization.py scope, the open question):** NOT vendored
+as part of chunking, and chunk_text does NOT call normalize_for_pipeline at all.
+- AudibleWeb's pipeline order is extract->clean->normalize->pronunciation->chunk
+  (design.md sec 3) — normalization happens upstream on the full text, so
+  chunking is pure structural paragraph/sentence splitting on already-normalized
+  text. Dropped abogen's normalized_text/display_text/original_text dual-tracking
+  entirely (that existed only because abogen normalizes per-chunk, post-split).
+- The bulk of kokoro_text_normalization.py (~2300 lines: dates/times/numbers/
+  currency/roman-numerals/contractions/internet-slang/address-abbrev/acronyms/
+  titles) is engine-agnostic "make raw text speakable" normalization, despite the
+  filename. It's the rule-based default impl for pipeline/normalize.py
+  (reader-8f2.12), as `lib/text_normalization.py`, slimmed: drop abogen's
+  runtime-settings/cache layer (normalization_settings.py) in favor of
+  config.yaml keys, and drop its narrow LLM-contraction sub-path (mode=="llm")
+  — AudibleWeb's broader Stage-2 LLM rewrite (design.md sec 3) supersedes it.
+  Always-on rule-based normalization runs regardless of whether the optional
+  LLM stage is configured (matches "LLM normalization gracefully degrades" key
+  decision).
+- `apply_phoneme_hints` (IPA/misaki sibilant-iz markers, ~6 lines) IS genuinely
+  Kokoro-specific — relocate to engines/kokoro.py as a pre-synthesis step
+  (reader-8f2.4), not part of the shared pipeline.
+- Recorded in reader-8f2.2 notes (`bd show reader-8f2.2`) so reader-8f2.12 doesn't
+  re-derive this.
+
+Files: audibleweb/lib/__init__.py (new), audibleweb/lib/chunking.py (new),
+tests/test_chunking.py (new), .pocock/archive.md (new — moved oldest entry here).
+
+Unblocks: reader-8f2.12 (normalize.py) has its scope/placement decided;
+reader-8f2.4 (kokoro engine) has apply_phoneme_hints placement decided;
+reader-8f2.10 (final wiring) — chunking dep satisfied.
+
 ### Iteration: reader-z4v [eng-T3] background worker thread (closed)
 Built `audibleweb/worker.py` (Worker: daemon thread + own asyncio event loop,
 polls `jobs` for status='queued' one at a time, `start()`/`stop()` w/ graceful
@@ -72,19 +110,6 @@ Key blocking chains (fixups wait on these):
 - reader-8f2.10 [build-9, P1] wires everything together (queue.py + SSE) — blocked by
   ALL of the above, by design. Do this last.
 
-### Setup (manual, pre-loop)
-Scaffolded app shell + SQLite schema (closed reader-392/eng-T2, reader-tio/eng-T6
-manually, not via loop):
-- pyproject.toml: uv project, Python 3.12+, deps=[flask], dev=[pytest,ruff],
-  entry point `audibleweb = audibleweb.app:main`
-- audibleweb/db.py: migration runner, PRAGMA user_version, applies
-  audibleweb/migrations/NNN_*.sql in order, idempotent
-- audibleweb/migrations/001_initial.sql: jobs + chunks tables (docs/design.md sec 5;
-  chunks table = per-chunk text intermediates per eng D5)
-- audibleweb/app.py: create_app() factory runs migrations on startup, /healthz route,
-  check_ffmpeg() exits clean if ffmpeg missing from PATH
-- tests/test_db.py, tests/test_app.py: 6 tests passing
-
 ---
 
 ## Active Roadblocks
@@ -117,13 +142,11 @@ Patterns, gotchas, and decisions that affect future work:
 - `/Users/Daniel.Michaelis/audiobook-creator/utils/{voice_parser.py,audio_mixer.py,
   run_shell_commands.py}` + matching `tests/` — source for reader-tt4 (lib/voice.py)
   and reader-8f2.5 (pipeline/stitch.py ffmpeg helpers).
-- `/Users/Daniel.Michaelis/abogen/abogen/{chunking.py,kokoro_text_normalization.py,
-  normalization_settings.py,llm_client.py,word_substitution.py}` — source for
-  reader-8f2.2 (chunking) and reader-8f2.12 (normalize).
-
-### Open decision for reader-8f2.2
-Before vendoring core/chunking.py, read abogen's kokoro_text_normalization.py and
-decide: fold its normalization rules into chunking (Stage 3, deterministic) vs.
-keep them as part of pipeline/normalize.py (Stage 2, LLM-optional). Record the
-choice in that issue's notes (`bd update reader-8f2.2 --notes "..."`) so reader-8f2.12
-doesn't duplicate the work.
+- `/Users/Daniel.Michaelis/abogen/abogen/chunking.py` — source for reader-8f2.2
+  (done — see closed iteration above).
+- `/Users/Daniel.Michaelis/abogen/abogen/{kokoro_text_normalization.py,
+  normalization_settings.py,llm_client.py}` — source for reader-8f2.12
+  (lib/text_normalization.py, slimmed per reader-8f2.2's scope decision above);
+  `apply_phoneme_hints` portion goes to reader-8f2.4 (engines/kokoro.py) instead.
+- `/Users/Daniel.Michaelis/abogen/abogen/word_substitution.py` — source for
+  reader-8f2.1 (lib/cleaning.py).
