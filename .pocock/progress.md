@@ -10,41 +10,6 @@ This file maintains context between autonomous iterations.
 <!-- This section is a rolling window - keep only the last 3 entries -->
 <!-- Move older entries to archive.md -->
 
-### Iteration: reader-8f2.3 [build-5] extractors/base.py + raw_text.py + file.py (closed)
-Built `audibleweb/extractors/{base,raw_text,file}.py` + `tests/test_extractors.py`
-(21 tests).
-
-Key decisions:
-- Scope split: original reader-8f2.3 covered all 4 extractors (raw_text/file/web/
-  rss) — too big for one pass. Split web.py -> reader-8f2.14, rss.py ->
-  reader-8f2.15 (both dep on this issue for base.py). Re-wired reader-8f2.10
-  (final wiring) and reader-whv (RSS first-sync) to also dep on 8f2.14/8f2.15
-  respectively (verified `bd dep cycles` = none). reader-8f2.3's own acceptance
-  criteria narrowed to base.py+raw_text.py+file.py.
-- extractors/base.py is the shared core abstraction for ALL 4 extractors (incl.
-  8f2.14/8f2.15): `Article` dataclass, `Extractor` Protocol (runtime_checkable for
-  plugin-discovery isinstance checks, reader-8f2.13), `ExtractionError` exception,
-  `derive_title()` + `make_article()` factory. make_article() enforces the
-  "<100 chars -> No extractable content" failure mode from design.md sec 9 —
-  centralized here so 8f2.14 (web) and 8f2.15 (rss) don't reimplement it.
-- RawTextExtractor.can_handle always returns True (catch-all/fallback — raw text
-  is explicitly selected via input_type, never auto-detected). Note for
-  reader-8f2.10/8f2.13: any can_handle-based dispatcher must check
-  RawTextExtractor last.
-- FileExtractor: .pdf via PyMuPDF (`fitz`, added as dep — `uv add pymupdf`,
-  1.27.2.3). .md title derived from first "# heading" via derive_title(); .txt
-  title = filename stem (txt rarely has a meaningful first line). PDF
-  title/author pulled from doc.metadata, falls back to filename stem.
-- Did NOT implement source-unreachable / both-methods-failed checks beyond
-  make_article's generic <100-char check — web.py's specific failure messages
-  ("Could not fetch URL", "Extraction failed (both methods)") are 8f2.14's job.
-
-Files: audibleweb/extractors/{__init__,base,raw_text,file}.py (new),
-tests/test_extractors.py (new, 21 tests), pyproject.toml + uv.lock (+pymupdf).
-
-Unblocks: reader-8f2.14 (web.py) and reader-8f2.15 (rss.py) have base.py +
-shared ExtractionError/make_article ready to import.
-
 ### Iteration: reader-8f2.4 [build-6] engines/base.py + engines/kokoro.py (closed)
 Built `audibleweb/engines/{base,kokoro}.py` + `tests/test_kokoro.py` (10 tests,
 58 total now). Added `httpx` dep (`uv add httpx`, 0.28.1) for async HTTP to the
@@ -162,6 +127,43 @@ Unblocks: reader-8f2.10 (queue wiring), reader-fco (episode rotation), reader-ks
 (atomic single-push) — Publisher Protocol + Episode + both publishers + feed
 gen/validation ready to import.
 
+### Iteration: reader-8f2.5 [build-7] pipeline/stitch.py (FFmpeg concat) (closed)
+Built `audibleweb/pipeline/{__init__,stitch.py}` + `tests/test_stitch.py` (4
+tests). 85 total now. No new deps (ffmpeg/ffprobe already on PATH).
+
+Key decisions:
+- New `pipeline/` package (not `core/`) — matches the naming used by other
+  open issues (reader-8f2.10 "pipeline/queue.py", reader-8f2.12
+  "pipeline/normalize.py"), diverging from design.md sec11's `core/tts.py`.
+  First file in this package.
+- `stitch_chunks(chunk_paths: list[Path], output_path: Path) -> float`: single
+  ffmpeg invocation using `-filter_complex` with per-stream `aformat` (forces
+  s16/sample_rate/channel_layout from chunk[0]) followed by `concat`. This
+  normalizes silence + all chunks to one format before concatenating, so
+  ffmpeg's concat filter doesn't choke on mismatched sample rates/formats
+  across chunks (tested explicitly: 24000Hz + 22050Hz chunks). 0.5s
+  `anullsrc` silence prepended/appended via `-f lavfi -t 0.5 -i
+  "anullsrc=r=...:cl=..."`, matched to chunk[0]'s rate/channel layout.
+- Output: `-c:a libmp3lame -b:a 128k` (CBR per design.md sec4). Duration read
+  back via `ffprobe -show_entries format=duration` on the encoded MP3 (not
+  the input WAVs) — captures any encoder padding.
+- chunk[0]'s sample_rate/channels read via stdlib `wave` module (no subprocess
+  needed for that probe) — only ffmpeg/ffprobe calls go through
+  asyncio.create_subprocess_exec (Eng D4: hardcoded argv, no shell, no
+  allowlist needed beyond that — matches publishers/github_pages.py's git
+  subprocess pattern).
+- `StitchError` raised for: empty chunk_paths, ffmpeg non-zero exit, ffprobe
+  non-zero exit.
+- Tests use stdlib `wave` to generate silent WAV fixtures on the fly (no
+  fixture files needed) — ffmpeg actually runs (no mock), same
+  "tools-on-PATH" pattern as github_pages.py's local-bare-repo tests.
+
+Files: audibleweb/pipeline/{__init__,stitch.py} (new), tests/test_stitch.py
+(new, 4 tests).
+
+Unblocks: reader-8f2.10 (queue.py wiring) — `stitch_chunks()` ready to import
+for the generate->stitch->publish handoff.
+
 ---
 
 ## Active Roadblocks
@@ -220,12 +222,16 @@ Patterns, gotchas, and decisions that affect future work:
   `publish()`'s return + the MP3's `stat().st_size` before calling
   `update_feed()`. Test gh-pages pushes against a local bare repo
   (`git init --bare -b gh-pages`) via `remote_url=` override — no live network.
+- `audibleweb/pipeline/stitch.py` (reader-8f2.5) ready for reader-8f2.10 (queue
+  wiring): `stitch_chunks(chunk_paths: list[Path], output_path: Path) ->
+  float` (returns duration_sec). New `pipeline/` package — put
+  reader-8f2.10's queue.py and reader-8f2.12's normalize.py here too (not
+  `core/`), matching the issue titles' naming, not design.md sec11's
+  `core/tts.py`/`core/pipeline.py` (core/pipeline.py already exists as the
+  reader-z4v stub and stays — `pipeline/` is for the new per-stage modules).
+  Raises `StitchError`.
 
 ### Vendoring sources (local paths, confirmed to exist)
-- `/Users/Daniel.Michaelis/audiobook-creator/utils/run_shell_commands.py` +
-  matching `tests/` — source for reader-8f2.5 (pipeline/stitch.py ffmpeg
-  helpers). (voice_parser.py/audio_mixer.py already vendored — see reader-tt4
-  closed iteration above.)
 - `/Users/Daniel.Michaelis/abogen/abogen/chunking.py` — source for reader-8f2.2
   (done — see closed iteration above).
 - `/Users/Daniel.Michaelis/abogen/abogen/{kokoro_text_normalization.py,

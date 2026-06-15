@@ -165,3 +165,38 @@ pyproject.toml + uv.lock (+pydub).
 
 Unblocks: reader-8f2.4 (engines/kokoro.py) can import parse_voice_spec +
 mix_weighted_blend for blend resolution.
+
+### Iteration: reader-8f2.3 [build-5] extractors/base.py + raw_text.py + file.py (closed)
+Built `audibleweb/extractors/{base,raw_text,file}.py` + `tests/test_extractors.py`
+(21 tests).
+
+Key decisions:
+- Scope split: original reader-8f2.3 covered all 4 extractors (raw_text/file/web/
+  rss) — too big for one pass. Split web.py -> reader-8f2.14, rss.py ->
+  reader-8f2.15 (both dep on this issue for base.py). Re-wired reader-8f2.10
+  (final wiring) and reader-whv (RSS first-sync) to also dep on 8f2.14/8f2.15
+  respectively (verified `bd dep cycles` = none). reader-8f2.3's own acceptance
+  criteria narrowed to base.py+raw_text.py+file.py.
+- extractors/base.py is the shared core abstraction for ALL 4 extractors (incl.
+  8f2.14/8f2.15): `Article` dataclass, `Extractor` Protocol (runtime_checkable for
+  plugin-discovery isinstance checks, reader-8f2.13), `ExtractionError` exception,
+  `derive_title()` + `make_article()` factory. make_article() enforces the
+  "<100 chars -> No extractable content" failure mode from design.md sec 9 —
+  centralized here so 8f2.14 (web) and 8f2.15 (rss) don't reimplement it.
+- RawTextExtractor.can_handle always returns True (catch-all/fallback — raw text
+  is explicitly selected via input_type, never auto-detected). Note for
+  reader-8f2.10/8f2.13: any can_handle-based dispatcher must check
+  RawTextExtractor last.
+- FileExtractor: .pdf via PyMuPDF (`fitz`, added as dep — `uv add pymupdf`,
+  1.27.2.3). .md title derived from first "# heading" via derive_title(); .txt
+  title = filename stem (txt rarely has a meaningful first line). PDF
+  title/author pulled from doc.metadata, falls back to filename stem.
+- Did NOT implement source-unreachable / both-methods-failed checks beyond
+  make_article's generic <100-char check — web.py's specific failure messages
+  ("Could not fetch URL", "Extraction failed (both methods)") are 8f2.14's job.
+
+Files: audibleweb/extractors/{__init__,base,raw_text,file}.py (new),
+tests/test_extractors.py (new, 21 tests), pyproject.toml + uv.lock (+pymupdf).
+
+Unblocks: reader-8f2.14 (web.py) and reader-8f2.15 (rss.py) have base.py +
+shared ExtractionError/make_article ready to import.
