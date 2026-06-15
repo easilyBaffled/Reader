@@ -10,6 +10,41 @@ This file maintains context between autonomous iterations.
 <!-- This section is a rolling window - keep only the last 3 entries -->
 <!-- Move older entries to archive.md -->
 
+### Iteration: reader-8f2.3 [build-5] extractors/base.py + raw_text.py + file.py (closed)
+Built `audibleweb/extractors/{base,raw_text,file}.py` + `tests/test_extractors.py`
+(21 tests).
+
+Key decisions:
+- Scope split: original reader-8f2.3 covered all 4 extractors (raw_text/file/web/
+  rss) — too big for one pass. Split web.py -> reader-8f2.14, rss.py ->
+  reader-8f2.15 (both dep on this issue for base.py). Re-wired reader-8f2.10
+  (final wiring) and reader-whv (RSS first-sync) to also dep on 8f2.14/8f2.15
+  respectively (verified `bd dep cycles` = none). reader-8f2.3's own acceptance
+  criteria narrowed to base.py+raw_text.py+file.py.
+- extractors/base.py is the shared core abstraction for ALL 4 extractors (incl.
+  8f2.14/8f2.15): `Article` dataclass, `Extractor` Protocol (runtime_checkable for
+  plugin-discovery isinstance checks, reader-8f2.13), `ExtractionError` exception,
+  `derive_title()` + `make_article()` factory. make_article() enforces the
+  "<100 chars -> No extractable content" failure mode from design.md sec 9 —
+  centralized here so 8f2.14 (web) and 8f2.15 (rss) don't reimplement it.
+- RawTextExtractor.can_handle always returns True (catch-all/fallback — raw text
+  is explicitly selected via input_type, never auto-detected). Note for
+  reader-8f2.10/8f2.13: any can_handle-based dispatcher must check
+  RawTextExtractor last.
+- FileExtractor: .pdf via PyMuPDF (`fitz`, added as dep — `uv add pymupdf`,
+  1.27.2.3). .md title derived from first "# heading" via derive_title(); .txt
+  title = filename stem (txt rarely has a meaningful first line). PDF
+  title/author pulled from doc.metadata, falls back to filename stem.
+- Did NOT implement source-unreachable / both-methods-failed checks beyond
+  make_article's generic <100-char check — web.py's specific failure messages
+  ("Could not fetch URL", "Extraction failed (both methods)") are 8f2.14's job.
+
+Files: audibleweb/extractors/{__init__,base,raw_text,file}.py (new),
+tests/test_extractors.py (new, 21 tests), pyproject.toml + uv.lock (+pymupdf).
+
+Unblocks: reader-8f2.14 (web.py) and reader-8f2.15 (rss.py) have base.py +
+shared ExtractionError/make_article ready to import.
+
 ### Iteration: reader-8f2.2 [build-4] chunking + kokoro_text_normalization scope decision (closed)
 Built `audibleweb/lib/chunking.py` (`chunk_text(text, level: "paragraph"|"sentence")
 -> list[str]`) + `tests/test_chunking.py` (5 tests). Adapted from abogen's
@@ -81,35 +116,6 @@ tests/test_app.py (start_worker flags + new test).
 Unblocks: reader-8f2.10 (final wiring) can now build on Worker/run_pipeline;
 reader-ebs (async-arch doc) can reference this implementation.
 
-### Setup round 2 (manual, pre-loop)
-Epic reader-8f2 expanded from 11 review-fixup tasks to 24 (11 fixups + 13 new
-"build-*" base tasks covering plan Next Steps 2-10 + REST API/UI/SSE/config/
-plugin discovery). Reason: the 11 fixup tasks target modules that don't exist
-yet — base build must land first. Dependency graph wired via `bd dep` (verified
-`bd dep cycles` = none), so fixups auto-unblock once their target module exists.
-
-10 P1 tasks are ready now (no blockers) — run `bd ready --parent reader-8f2`:
-- reader-tt4 [eng-T1] vendor lib/voice.py (from audiobook-creator, build split per D1)
-- reader-z4v [eng-T3] background asyncio worker thread
-- reader-8f2.1 [build-3] vendor core/cleaning.py
-- reader-8f2.2 [build-4] vendor core/chunking.py — ALSO decide kokoro_text_normalization
-  scope (see Project Learnings below, open decision)
-- reader-8f2.3 [build-5] extractors/ (raw_text, file, web, rss)
-- reader-8f2.4 [build-6] engines/kokoro.py
-- reader-8f2.5 [build-7] pipeline/stitch.py (ffmpeg concat)
-- reader-8f2.6 [build-8] publishers/github_pages.py + local.py
-- reader-8f2.7 [build-1a] REST API (api/routes.py)
-- reader-8f2.12 [build-10] pipeline/normalize.py (optional LLM stage)
-
-Key blocking chains (fixups wait on these):
-- reader-8f2.4 (kokoro) blocks reader-yau (WAV validation) + reader-n19 (pause/fallback)
-- reader-8f2.3 (extractors) blocks reader-whv (RSS first-sync) + reader-8f2.13 (plugin discovery)
-- reader-8f2.6 (publisher) blocks reader-fco (episode rotation) + reader-ksd (atomic push)
-- reader-z4v (worker) blocks reader-ebs (async-arch doc)
-- reader-8f2.7 (api) blocks reader-8f2.11 (sse) + reader-8f2.8 (web UI)
-- reader-8f2.10 [build-9, P1] wires everything together (queue.py + SSE) — blocked by
-  ALL of the above, by design. Do this last.
-
 ---
 
 ## Active Roadblocks
@@ -137,6 +143,13 @@ Patterns, gotchas, and decisions that affect future work:
   they read/write the `jobs`/`chunks` SQLite tables and the worker thread polls them.
 - Feedback loop is wired and green: `uv run pytest`, `uv run ruff check .`,
   `uv run ruff format --check .` — keep all three passing before every commit.
+- `audibleweb/extractors/base.py` (reader-8f2.3) is THE shared core abstraction
+  for all 4 extractors: `Article`, `Extractor` Protocol, `ExtractionError`,
+  `derive_title()`, `make_article()`. reader-8f2.14 (web.py) and reader-8f2.15
+  (rss.py) should import from here, not redefine. PyMuPDF (`fitz`) added via
+  `uv add pymupdf` — that pattern (uv add updates pyproject.toml + uv.lock
+  together) works fine for adding new extractor/engine deps going forward
+  (trafilatura/httpx/feedparser for 8f2.14/8f2.15).
 
 ### Vendoring sources (local paths, confirmed to exist)
 - `/Users/Daniel.Michaelis/audiobook-creator/utils/{voice_parser.py,audio_mixer.py,
