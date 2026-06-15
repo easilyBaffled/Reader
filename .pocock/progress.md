@@ -10,6 +10,39 @@ This file maintains context between autonomous iterations.
 <!-- This section is a rolling window - keep only the last 3 entries -->
 <!-- Move older entries to archive.md -->
 
+### Iteration: reader-z4v [eng-T3] background worker thread (closed)
+Built `audibleweb/worker.py` (Worker: daemon thread + own asyncio event loop,
+polls `jobs` for status='queued' one at a time, `start()`/`stop()` w/ graceful
+shutdown) + `audibleweb/core/pipeline.py` (stub `run_pipeline(conn, job_id)` ->
+sets status='done'). Wired into `create_app(start_worker=True default)` via
+`app.extensions["worker"]` + `atexit.register(worker.stop)`.
+
+Key decisions:
+- Created `audibleweb/core/` package — this is the design.md sec 11
+  orchestration package (pipeline.py, later job_queue.py/text_pipeline.py/
+  feed.py), NOT the vendored-utils location. Confirms D2: vendored
+  voice/cleaning/chunking code still goes in `lib/`, no collision.
+- Added `PRAGMA busy_timeout = 5000` to db.py's get_connection — worker
+  thread + Flask routes now hold separate connections to the same SQLite
+  file; writers wait instead of raising "database is locked" on collision.
+  Skipped WAL (avoids extra -wal/-shm files for v1).
+- Worker.stop() must tolerate being called twice (atexit + manual in tests) —
+  asyncio.run() closes the loop after _main() returns, so stop() checks
+  `loop.is_closed()` before call_soon_threadsafe.
+- core/pipeline.run_pipeline is the extension point for real
+  extract->normalize->generate->publish stages (later build tasks, esp.
+  reader-8f2.10). Currently just flips queued->done.
+- Existing test_app.py tests pass `start_worker=False` (worker not under
+  test there); added test_create_app_starts_worker for the wiring itself.
+
+Files: audibleweb/worker.py (new), audibleweb/core/__init__.py (new),
+audibleweb/core/pipeline.py (new), audibleweb/db.py (busy_timeout),
+audibleweb/app.py (Worker wiring), tests/test_worker.py (new),
+tests/test_app.py (start_worker flags + new test).
+
+Unblocks: reader-8f2.10 (final wiring) can now build on Worker/run_pipeline;
+reader-ebs (async-arch doc) can reference this implementation.
+
 ### Setup round 2 (manual, pre-loop)
 Epic reader-8f2 expanded from 11 review-fixup tasks to 24 (11 fixups + 13 new
 "build-*" base tasks covering plan Next Steps 2-10 + REST API/UI/SSE/config/

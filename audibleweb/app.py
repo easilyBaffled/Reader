@@ -1,5 +1,6 @@
 """Flask application factory and process entrypoint."""
 
+import atexit
 import os
 import shutil
 import sys
@@ -8,11 +9,12 @@ from pathlib import Path
 from flask import Flask
 
 from audibleweb.db import get_connection, migrate
+from audibleweb.worker import Worker
 
 DEFAULT_DB_PATH = Path("data/audibleweb.db")
 
 
-def create_app(db_path: str | Path | None = None) -> Flask:
+def create_app(db_path: str | Path | None = None, start_worker: bool = True) -> Flask:
     app = Flask(__name__)
 
     db_path = Path(db_path or os.environ.get("AUDIBLEWEB_DB_PATH", DEFAULT_DB_PATH))
@@ -24,6 +26,12 @@ def create_app(db_path: str | Path | None = None) -> Flask:
     @app.get("/healthz")
     def healthz():
         return {"status": "ok"}
+
+    if start_worker:
+        worker = Worker(db_path)
+        worker.start()
+        app.extensions["worker"] = worker
+        atexit.register(worker.stop)
 
     return app
 

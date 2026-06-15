@@ -4,7 +4,7 @@ from audibleweb.app import check_ffmpeg, create_app
 
 
 def test_healthz(tmp_path):
-    app = create_app(db_path=tmp_path / "test.db")
+    app = create_app(db_path=tmp_path / "test.db", start_worker=False)
     client = app.test_client()
 
     resp = client.get("/healthz")
@@ -15,9 +15,19 @@ def test_healthz(tmp_path):
 
 def test_create_app_runs_migrations(tmp_path):
     db_path = tmp_path / "test.db"
-    create_app(db_path=db_path)
+    create_app(db_path=db_path, start_worker=False)
 
     assert db_path.exists()
+
+
+def test_create_app_starts_worker(tmp_path):
+    app = create_app(db_path=tmp_path / "test.db")
+
+    try:
+        worker = app.extensions["worker"]
+        assert worker._thread.is_alive()
+    finally:
+        app.extensions["worker"].stop()
 
 
 def test_check_ffmpeg_missing_exits(monkeypatch):

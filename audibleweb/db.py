@@ -16,6 +16,10 @@ def get_connection(db_path: str | Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # The worker thread and Flask routes hold separate connections to the
+    # same file; let writers wait briefly instead of raising "database is
+    # locked" on a momentary collision.
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 
