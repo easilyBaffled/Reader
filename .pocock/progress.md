@@ -10,6 +10,32 @@ This file maintains context between autonomous iterations.
 <!-- This section is a rolling window - keep only the last 3 entries -->
 <!-- Move older entries to archive.md -->
 
+### Iteration: reader-8f2.11 [build-1c] SSE progress stream (closed)
+New `audibleweb/api/sse.py` blueprint. 7 new tests (261 total). No new deps.
+
+Key decisions:
+- `sse_bp` registered at `/api/jobs` with route `/<job_id>/stream` (GET).
+  Separate blueprint from `api_bp` to keep routes.py focused.
+- Sync Flask generator via `stream_with_context` + `time.sleep(1)` polling SQLite.
+  No async, no shared in-process state — matches D13 (Flask stays sync).
+- Event payload: `{id, status, title, error, chunks_done, chunks_total}`. Only
+  `chunks_done`/`chunks_total` are non-zero when `status=="generating"` (queried
+  from `chunks` table via COUNT/SUM). Zero for all other stages.
+- Generator terminates on `done`/`failed` (terminal set). Unknown job_id emits
+  `{error: "job not found", id: ...}` and returns immediately.
+- Queue tab JS: inline `<script>` in `queue.html` active-job card. `EventSource`
+  opens on card render, updates progress-fill width + label text on each message.
+  On terminal state: `es.close()` + `htmx.ajax` to reload `/tab/queue`.
+- Progress pct formula: extracting=10, normalizing=30, generating=30+60*(done/total),
+  publishing=90. Hard-coded stage map — simple enough, avoids DB writes.
+- Tests: Flask test client reads full SSE body synchronously (generator exhausts
+  when terminal). Non-terminal (generating) jobs tested via `_progress()` direct
+  call (snapshot) to avoid infinite loop in test client.
+
+Files: audibleweb/api/sse.py (new), audibleweb/app.py (+sse_bp import+register),
+audibleweb/web/templates/partials/queue.html (+SSE JS on active card),
+tests/test_sse.py (new, 7 tests).
+
 ### Iteration: reader-8f2.8 [build-1b] Web UI: Jinja templates + DESIGN.md tokens (closed)
 New `audibleweb/web/` blueprint + `audibleweb/static/css/`. 25 new tests (254 total). No new deps.
 
@@ -56,31 +82,6 @@ Key decisions:
 Files: audibleweb/migrations/003_rss_seen.sql (new), audibleweb/db.py (+2 helpers),
 audibleweb/extractors/rss.py (+first_subscribe, +list_new_articles, +_entry_id),
 tests/test_db.py (version bump), tests/test_rss_extractor.py (+4 tests).
-
-### Iteration: reader-8f2.15 [build-5c] extractors/rss.py: RSS feed import (closed)
-Also closed: reader-8f2.7 (REST API) and reader-8hb (heartbeat) — both were already
-fully implemented in prior iterations, just not marked done.
-
-New `audibleweb/extractors/rss.py`. 15 new tests (225 total). Added feedparser dep.
-
-Key decisions:
-- `RSSImportExtractor.list_articles(feed_url) -> list[Article]` is the primary API
-  (not `extract()`) — RSS is multi-article. `extract()` returns first article for
-  Protocol compliance; queue wiring (reader-8f2.10) should call `list_articles()`.
-- `can_handle()` heuristic: URL starts with http/https AND contains an RSS/feed/atom
-  URL pattern (/rss, /feed, /atom, .xml, etc). No network call for routing.
-- Fetch via httpx async, parse via `feedparser.parse(content_string)` (not feedparser's
-  own fetch — keeps async flow consistent with other extractors).
-- HTML stripping: `re.sub(r"<[^>]+>", " ", html)` — lightweight, no extra dep.
-  feedparser already sanitizes most HTML; this is a final safety net.
-- `content:encoded` preferred over `<description>` when present — full article body
-  vs summary. `entry.get("content")[0]["value"]` for content:encoded via feedparser.
-- Short entries (summary < 100 chars after strip) silently skipped via make_article
-  raising ExtractionError — consistent with other extractors' min content policy.
-- Tests: inline XML fixture strings + httpx.MockTransport; no network, no temp files.
-
-Files: audibleweb/extractors/rss.py (new), tests/test_rss_extractor.py (new, 15 tests),
-pyproject.toml (+feedparser>=6.0.12).
 
 ---
 

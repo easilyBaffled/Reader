@@ -63,15 +63,45 @@
           'generating':  'Generating audio...',
           'publishing':  'Publishing to feed...',
         } %}
-        <div class="progress-wrap">
+        <div class="progress-wrap" id="progress-{{ job.id }}">
           <div class="progress-track">
-            <div class="progress-fill" style="width: 33%"></div>
+            <div class="progress-fill" id="progress-fill-{{ job.id }}" style="width: 33%"></div>
           </div>
           <div class="progress-meta">
-            <span>{{ stage_labels.get(job.status, job.status) }}</span>
+            <span id="progress-label-{{ job.id }}">{{ stage_labels.get(job.status, job.status) }}</span>
           </div>
         </div>
       </article>
+      <script>
+        (function () {
+          var jobId = "{{ job.id }}";
+          var stageLabels = {
+            extracting: "Extracting article...",
+            normalizing: "Normalizing text...",
+            generating: "Generating audio...",
+            publishing: "Publishing to feed..."
+          };
+          var stageProgress = { extracting: 10, normalizing: 30, generating: 60, publishing: 90 };
+          var es = new EventSource("/api/jobs/" + jobId + "/stream");
+          es.onmessage = function (e) {
+            var d = JSON.parse(e.data);
+            var fill = document.getElementById("progress-fill-" + jobId);
+            var label = document.getElementById("progress-label-" + jobId);
+            if (!fill || !label) { es.close(); return; }
+            var pct = stageProgress[d.status] || 0;
+            if (d.status === "generating" && d.chunks_total > 0) {
+              pct = 30 + Math.round((d.chunks_done / d.chunks_total) * 60);
+            }
+            fill.style.width = pct + "%";
+            label.textContent = stageLabels[d.status] || d.status;
+            if (d.status === "done" || d.status === "failed") {
+              es.close();
+              htmx.ajax("GET", "/tab/queue", { target: "#main-content", swap: "innerHTML" });
+            }
+          };
+          es.onerror = function () { es.close(); };
+        })();
+      </script>
     {% endif %}
 
     {# Completed / failed / queued rows #}
