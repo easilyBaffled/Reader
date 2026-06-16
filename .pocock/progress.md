@@ -10,6 +10,48 @@ This file maintains context between autonomous iterations.
 <!-- This section is a rolling window - keep only the last 3 entries -->
 <!-- Move older entries to archive.md -->
 
+### Iteration: reader-8f2.12 [build-10] pipeline/normalize.py: optional LLM Stage 2 (closed)
+Built `audibleweb/pipeline/normalize.py` + `tests/test_normalize.py` (17 tests,
+160 total now). No new deps (httpx already present).
+
+Key decisions:
+- `normalize_text(text, config, *, _client=None) -> str` — async, same
+  constructor-injection pattern as KokoroEngine/WebExtractor. `_client`
+  (httpx.AsyncClient) injected for tests; prod path creates its own client
+  per call and closes it in a `finally` block.
+- `_is_configured(config)` → False if `llm_enabled=False` or `llm_base_url=""`
+  or `llm_model=""` — any of these means "skip silently, return original".
+- Chunking: `_chunk_text(text, max_chars=2000)` splits on `\n\n`, groups
+  paragraphs up to max_chars (separator costs 2 chars), flushes when next
+  para would overflow. Single para longer than max_chars stays as one chunk
+  (never mid-paragraph split). 2000 chars ≈ 500 tokens, fits typical LLM
+  context easily.
+- `_normalize_chunk`: POST to `{base_url}/v1/chat/completions` (strips
+  trailing `/v1` duplication). Any exception (HTTP error, JSON decode, etc.)
+  → `logger.warning(...)` and return original chunk. Empty/whitespace-only
+  LLM response → same fallback. Malformed response shape (missing keys) →
+  same. This satisfies design.md sec 9: "LLM unavailable → skip, continue"
+  and "LLM returns garbage → discard, use pre-normalization text".
+- System prompt verbatim from design.md sec 3: "Rewrite for spoken narration.
+  Expand abbreviations, spell out numbers, don't change meaning."
+- Auth: `Authorization: Bearer {api_key}` omitted when key="" or "ollama",
+  matching kokoro.py and abogen/llm_client.py convention.
+- `_build_url`: handles both `http://host/v1` (appends `/chat/completions`)
+  and `http://host` (appends `/v1/chat/completions`) — avoids double `/v1/v1/`
+  path for Ollama-style base URLs that already include `/v1`.
+- Did NOT vendor `kokoro_text_normalization.py` (2378 lines, heavy deps:
+  num2words, spacy). Design.md Stage 2 scope is LLM-only normalization;
+  Stage 1 (rule-based Unicode/cleaning) is lib/cleaning.py (reader-8f2.1,
+  already done). No new deps needed.
+
+Files: audibleweb/pipeline/normalize.py (new), tests/test_normalize.py (new,
+17 tests). No pyproject.toml changes.
+
+Unblocks: reader-8f2.10 (queue wiring) — all three pipeline pieces now ready:
+`stitch_chunks` (stitch.py), `normalize_text` (normalize.py), and config
+(`load_config()`). reader-8f2.15 (rss.py extractor) still in_progress;
+queue wiring depends on both.
+
 ### Iteration: reader-yau [ceo-T1] WAV header validation in engines/kokoro.py (closed)
 Added `InvalidWAVError` + `_validate_wav_header(data: bytes) -> None` to
 `audibleweb/engines/kokoro.py`. Added 6 new tests (143 total). No new deps.
@@ -288,6 +330,12 @@ Patterns, gotchas, and decisions that affect future work:
   come from `.env` (`_ENV_OVERRIDES`), never from config.yaml in practice —
   any future code that serializes `AppConfig` back to config.yaml (e.g.
   reader-8f2.7.1's PUT /api/settings) MUST exclude these 5 fields.
+
+- `audibleweb/pipeline/normalize.py` (reader-8f2.12) ready for queue wiring:
+  `normalize_text(text, config, *, _client=None) -> str` (async). Skip if
+  `config.llm_enabled=False` or `base_url=""` or `model=""`. Any LLM error →
+  returns original text (never raises). Chunks by paragraph (2000 chars).
+  Imports from `audibleweb.config.NormalizationConfig`. No new deps.
 
 - `audibleweb/extractors/web.py` (reader-8f2.14) ready for queue wiring:
   `WebExtractor(jina_fallback=True, jina_api_key="", _client=None)`. httpx for
