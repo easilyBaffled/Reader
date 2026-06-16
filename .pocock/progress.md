@@ -10,6 +10,39 @@ This file maintains context between autonomous iterations.
 <!-- This section is a rolling window - keep only the last 3 entries -->
 <!-- Move older entries to archive.md -->
 
+### Iteration: reader-8f2.14 [build-5b] extractors/web.py: trafilatura + Jina fallback (closed)
+Built `audibleweb/extractors/web.py` + `tests/test_web_extractor.py` (14 tests,
+137 total now). Added `trafilatura==2.1.0` dep (`uv add trafilatura`). httpx
+already present.
+
+Key decisions:
+- `WebExtractor(jina_fallback=True, jina_api_key="", _client=None)` — same
+  constructor-injection pattern as KokoroEngine. `_client` (httpx.AsyncClient)
+  injected for tests; both the HTML fetch and Jina call share the same client
+  via `_get()` helper so tests mock with one MockTransport.
+- Fetch strategy: httpx.AsyncClient owns the initial HTML GET (not
+  `trafilatura.fetch_url()`). Reason: httpx raises `httpx.HTTPError` on
+  connection/HTTP errors, giving a clean path to "Could not fetch URL".
+  `trafilatura.fetch_url()` swallows all exceptions and returns None — no way
+  to distinguish unreachable URL from extractable-but-empty page.
+- Trafilatura called with `output_format="python"` → returns a Document object
+  with `.text`, `.title`, `.author`, `.date` (str ISO date). Accessed via
+  `getattr` defensively. If result is None OR text < 100 chars → Jina fallback.
+- Jina endpoint: `https://r.jina.ai/{url}`, `Accept: text/plain`,
+  `Authorization: Bearer {key}` (omitted if no key). httpx.HTTPError from
+  Jina → "Extraction failed (both methods)"; text < 100 chars → same.
+- Failure messages exactly match design.md sec 9: "Could not fetch URL" /
+  "No extractable content" / "Extraction failed (both methods)".
+- `_run_trafilatura(html, url)` is a module-level function (not a method) so
+  `unittest.mock.patch("trafilatura.extract", ...)` patches at the call site
+  cleanly in tests.
+
+Files: audibleweb/extractors/web.py (new), tests/test_web_extractor.py (new,
+14 tests), pyproject.toml + uv.lock (+trafilatura).
+
+Unblocks: reader-8f2.15 (rss.py) still needed before reader-8f2.10 (queue
+wiring). reader-8f2.15 is the last extractor — both block queue.
+
 ### Iteration: reader-8f2.9 [build-2x] config.py: .env + config.yaml hierarchy (closed)
 Built `audibleweb/config.py` + `config.yaml` + `.env.example` +
 `tests/test_config.py` (6 tests, 91 total now). Added `pyyaml`+`python-dotenv`
@@ -235,6 +268,13 @@ Patterns, gotchas, and decisions that affect future work:
   come from `.env` (`_ENV_OVERRIDES`), never from config.yaml in practice —
   any future code that serializes `AppConfig` back to config.yaml (e.g.
   reader-8f2.7.1's PUT /api/settings) MUST exclude these 5 fields.
+
+- `audibleweb/extractors/web.py` (reader-8f2.14) ready for queue wiring:
+  `WebExtractor(jina_fallback=True, jina_api_key="", _client=None)`. httpx for
+  HTML fetch (not trafilatura.fetch_url — httpx gives clean HTTPError for
+  "Could not fetch URL"). trafilatura.extract(..., output_format="python") for
+  extraction. Jina Reader: `https://r.jina.ai/{url}`. Tests mock via
+  httpx.MockTransport + `unittest.mock.patch("trafilatura.extract")`.
 
 ### Vendoring sources (local paths, confirmed to exist)
 - `/Users/Daniel.Michaelis/abogen/abogen/chunking.py` — source for reader-8f2.2
