@@ -9,12 +9,15 @@ Failure modes (sec 9):
 from __future__ import annotations
 
 import re
+import sqlite3
 import time
 from datetime import datetime
 from typing import Any
 
 import feedparser
 import httpx
+
+from audibleweb.db import get_seen_item_ids, mark_items_seen
 
 from .base import Article, ExtractionError, make_article
 
@@ -49,6 +52,39 @@ class RSSImportExtractor:
         return [
             a for entry in feed.entries if (a := _entry_to_article(entry)) is not None
         ]
+
+    async def first_subscribe(self, feed_url: str, conn: sqlite3.Connection) -> int:
+        """Mark all current feed items seen. Returns count. Creates 0 jobs."""
+        content = await self._fetch(feed_url)
+        feed = feedparser.parse(content)
+        if feed.get("bozo") and not feed.entries:
+            raise ExtractionError(f"Could not parse feed: {feed.get('bozo_exception')}")
+        item_ids = [iid for e in feed.entries if (iid := _entry_id(e))]
+        mark_items_seen(conn, feed_url, item_ids)
+        return len(item_ids)
+
+    async def list_new_articles(
+        self, feed_url: str, conn: sqlite3.Connection
+    ) -> list[Article]:
+        """Return articles not previously seen; marks them seen before returning."""
+        content = await self._fetch(feed_url)
+        feed = feedparser.parse(content)
+        if feed.get("bozo") and not feed.entries:
+            raise ExtractionError(f"Could not parse feed: {feed.get('bozo_exception')}")
+        seen = get_seen_item_ids(conn, feed_url)
+        new_ids: list[str] = []
+        articles: list[Article] = []
+        for entry in feed.entries:
+            iid = _entry_id(entry)
+            if iid and iid in seen:
+                continue
+            article = _entry_to_article(entry)
+            if article is not None:
+                articles.append(article)
+            if iid:
+                new_ids.append(iid)
+        mark_items_seen(conn, feed_url, new_ids)
+        return articles
 
     async def _fetch(self, url: str) -> str:
         try:
@@ -90,6 +126,10 @@ def _entry_text(entry: Any) -> str:
 
 def _strip_html(html: str) -> str:
     return re.sub(r"<[^>]+>", " ", html)
+
+
+def _entry_id(entry: Any) -> str:
+    return entry.get("id") or entry.get("link") or ""
 
 
 def _parse_struct_time(st: time.struct_time | None) -> datetime | None:

@@ -5,6 +5,7 @@ import asyncio
 import httpx
 import pytest
 
+from audibleweb.db import get_connection, migrate
 from audibleweb.extractors.base import ExtractionError
 from audibleweb.extractors.rss import RSSImportExtractor
 
@@ -229,3 +230,110 @@ def test_extract_empty_feed_raises():
     extractor = RSSImportExtractor(_client=_client_returning(RSS_EMPTY))
     with pytest.raises(ExtractionError, match="Feed contains no usable entries"):
         run(extractor.extract(FEED_URL))
+
+
+# --- first_subscribe / list_new_articles --------------------------------------
+
+
+@pytest.fixture()
+def db_conn(tmp_path):
+    conn = get_connection(tmp_path / "test.db")
+    migrate(conn)
+    yield conn
+    conn.close()
+
+
+RSS_THREE_ITEMS = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Blog</title>
+    <item>
+      <title>Post One</title>
+      <link>http://example.com/1</link>
+      <guid>guid-1</guid>
+      <description>{body}</description>
+    </item>
+    <item>
+      <title>Post Two</title>
+      <link>http://example.com/2</link>
+      <guid>guid-2</guid>
+      <description>{body}</description>
+    </item>
+    <item>
+      <title>Post Three</title>
+      <link>http://example.com/3</link>
+      <guid>guid-3</guid>
+      <description>{body}</description>
+    </item>
+  </channel>
+</rss>
+""".format(body=LONG_BODY)
+
+RSS_FOUR_ITEMS = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Blog</title>
+    <item>
+      <title>Post One</title>
+      <link>http://example.com/1</link>
+      <guid>guid-1</guid>
+      <description>{body}</description>
+    </item>
+    <item>
+      <title>Post Two</title>
+      <link>http://example.com/2</link>
+      <guid>guid-2</guid>
+      <description>{body}</description>
+    </item>
+    <item>
+      <title>Post Three</title>
+      <link>http://example.com/3</link>
+      <guid>guid-3</guid>
+      <description>{body}</description>
+    </item>
+    <item>
+      <title>New Post</title>
+      <link>http://example.com/4</link>
+      <guid>guid-4</guid>
+      <description>{body}</description>
+    </item>
+  </channel>
+</rss>
+""".format(body=LONG_BODY)
+
+
+def test_first_subscribe_marks_all_seen_returns_count(db_conn):
+    extractor = RSSImportExtractor(_client=_client_returning(RSS_THREE_ITEMS))
+    count = run(extractor.first_subscribe(FEED_URL, db_conn))
+    assert count == 3
+
+
+def test_list_new_articles_after_first_subscribe_returns_empty(db_conn):
+    extractor = RSSImportExtractor(_client=_client_returning(RSS_THREE_ITEMS))
+    run(extractor.first_subscribe(FEED_URL, db_conn))
+    # same 3 items still in feed
+    articles = run(extractor.list_new_articles(FEED_URL, db_conn))
+    assert articles == []
+
+
+def test_list_new_articles_returns_only_new_item(db_conn):
+    # subscribe with 3 items
+    extractor = RSSImportExtractor(_client=_client_returning(RSS_THREE_ITEMS))
+    run(extractor.first_subscribe(FEED_URL, db_conn))
+    # next poll: feed now has 4 items (1 new)
+    extractor2 = RSSImportExtractor(_client=_client_returning(RSS_FOUR_ITEMS))
+    articles = run(extractor2.list_new_articles(FEED_URL, db_conn))
+    assert len(articles) == 1
+    assert articles[0].title == "New Post"
+
+
+def test_list_new_articles_marks_returned_items_seen(db_conn):
+    extractor = RSSImportExtractor(_client=_client_returning(RSS_FOUR_ITEMS))
+    first = run(extractor.list_new_articles(FEED_URL, db_conn))
+    assert len(first) == 4
+    # second poll: nothing new
+    extractor2 = RSSImportExtractor(_client=_client_returning(RSS_FOUR_ITEMS))
+    second = run(extractor2.list_new_articles(FEED_URL, db_conn))
+    assert second == []

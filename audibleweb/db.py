@@ -5,6 +5,7 @@ and are applied in order, tracked via PRAGMA user_version.
 """
 
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
@@ -37,3 +38,23 @@ def migrate(conn: sqlite3.Connection, migrations_dir: Path = MIGRATIONS_DIR) -> 
         current = version
 
     return current
+
+
+def get_seen_item_ids(conn: sqlite3.Connection, feed_url: str) -> set[str]:
+    rows = conn.execute(
+        "SELECT item_id FROM rss_seen_items WHERE feed_url = ?", (feed_url,)
+    ).fetchall()
+    return {row["item_id"] for row in rows}
+
+
+def mark_items_seen(
+    conn: sqlite3.Connection, feed_url: str, item_ids: list[str]
+) -> None:
+    if not item_ids:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    conn.executemany(
+        "INSERT OR IGNORE INTO rss_seen_items (feed_url, item_id, seen_at) VALUES (?, ?, ?)",
+        [(feed_url, iid, now) for iid in item_ids],
+    )
+    conn.commit()
