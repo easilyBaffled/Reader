@@ -10,6 +10,30 @@ This file maintains context between autonomous iterations.
 <!-- This section is a rolling window - keep only the last 3 entries -->
 <!-- Move older entries to archive.md -->
 
+### Iteration: reader-8f2.7.1 [build-1a sub] GET/PUT /api/settings endpoint (closed)
+Added `GET /api/settings` + `PUT /api/settings` to `audibleweb/api/routes.py`.
+10 new tests (173 total). No new deps (yaml already present via pyyaml).
+
+Key decisions:
+- `app.config["CONFIG_PATH"]` stores the resolved config path so the settings
+  endpoint can write back config.yaml without hardcoding. `create_app()` gains
+  an optional `config_path` param; defaults to `DEFAULT_CONFIG_PATH` from config.py.
+  Tests pass `tmp_path / "config.yaml"` for full isolation.
+- GET: `dataclasses.asdict(config)` then `_strip_secrets()` removes the 5
+  secret fields (publisher.token, tts.api_key, extraction.jina_api_key,
+  normalization.llm_api_key, server.api_key). Secrets live in .env only.
+- PUT: body validated (must be dict, known sections only, each value a dict).
+  Secrets stripped silently from incoming body. Merges into current raw yaml
+  dict, validates merged result by constructing each affected section's
+  dataclass — TypeError on unknown fields → 400. Writes yaml.safe_dump,
+  calls load_config(), updates current_app.config["APP_CONFIG"].
+- `_SECTION_CLASSES` + `_SECRET_FIELDS` are module-level dicts in routes.py
+  to keep secret-stripping logic co-located with the endpoint.
+
+Files: audibleweb/api/__init__.py (staged, pre-existing untracked),
+audibleweb/api/routes.py (new/staged), audibleweb/app.py (modified,
++config_path param + CONFIG_PATH in app.config), tests/test_api.py (new/staged).
+
 ### Iteration: reader-ksd [ceo-T4] Atomic single-push publish workflow (closed)
 Added `publish_and_update_feed(episode, audio_path, all_episodes) -> tuple[str, str]`
 to Publisher Protocol in `base.py` + concrete implementations in both publishers.
