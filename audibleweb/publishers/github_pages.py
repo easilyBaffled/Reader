@@ -38,6 +38,8 @@ class GitHubPagesPublisher:
         branch: str = "gh-pages",
         feed_config: FeedConfig | None = None,
         remote_url: str | None = None,
+        max_episodes: int = 0,
+        max_size_mb: int = 0,
     ):
         self.repo = repo
         self.token = token
@@ -45,6 +47,8 @@ class GitHubPagesPublisher:
         self.branch = branch
         self.feed_config = feed_config
         self._remote_url = remote_url or f"https://{token}@github.com/{repo}.git"
+        self.max_episodes = max_episodes
+        self.max_size_mb = max_size_mb
         owner, _, name = repo.partition("/")
         self.pages_base_url = f"https://{owner}.github.io/{name}"
 
@@ -59,6 +63,8 @@ class GitHubPagesPublisher:
 
     async def update_feed(self, episodes: list[Episode]) -> str:
         await self._ensure_clone()
+        episodes = self._apply_rotation(episodes)
+        self._check_audio_size()
         xml = generate_feed(episodes, self.feed_config)
         validate_feed(xml)
         (self.work_dir / "feed.xml").write_text(xml, encoding="utf-8")
@@ -77,7 +83,9 @@ class GitHubPagesPublisher:
         audio_dir = self.work_dir / "audio"
         audio_dir.mkdir(exist_ok=True)
         shutil.copy2(audio_path, audio_dir / f"{slug}.mp3")
-        xml = generate_feed(all_episodes, self.feed_config)
+        kept_episodes = self._apply_rotation(all_episodes)
+        self._check_audio_size()
+        xml = generate_feed(kept_episodes, self.feed_config)
         validate_feed(xml)
         (self.work_dir / "feed.xml").write_text(xml, encoding="utf-8")
         await self._commit_and_push(f"Add episode: {episode.title}")
@@ -85,6 +93,36 @@ class GitHubPagesPublisher:
             f"{self.pages_base_url}/audio/{slug}.mp3",
             f"{self.pages_base_url}/feed.xml",
         )
+
+    def _apply_rotation(self, episodes: list[Episode]) -> list[Episode]:
+        """Keep newest max_episodes; delete older MP3s from work_dir/audio/."""
+        if self.max_episodes <= 0 or len(episodes) <= self.max_episodes:
+            return list(episodes)
+        sorted_eps = sorted(episodes, key=lambda e: e.published, reverse=True)
+        to_keep = sorted_eps[: self.max_episodes]
+        to_remove = sorted_eps[self.max_episodes :]
+        audio_dir = self.work_dir / "audio"
+        for ep in to_remove:
+            slug = episode_slug(ep.title, ep.published)
+            mp3 = audio_dir / f"{slug}.mp3"
+            if mp3.exists():
+                mp3.unlink()
+        return to_keep
+
+    def _check_audio_size(self) -> None:
+        """Raise GitHubPagesPublisherError if audio dir total MP3 size exceeds max_size_mb."""
+        if self.max_size_mb <= 0:
+            return
+        audio_dir = self.work_dir / "audio"
+        if not audio_dir.exists():
+            return
+        total_bytes = sum(f.stat().st_size for f in audio_dir.glob("*.mp3"))
+        limit_bytes = self.max_size_mb * 1024 * 1024
+        if total_bytes > limit_bytes:
+            raise GitHubPagesPublisherError(
+                f"total audio size ({total_bytes // (1024 * 1024)} MB) exceeds "
+                f"GitHub Pages limit ({self.max_size_mb} MB)"
+            )
 
     async def _ensure_clone(self) -> None:
         if (self.work_dir / ".git").is_dir():

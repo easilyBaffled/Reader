@@ -264,3 +264,85 @@ def test_local_publisher_publish_and_update_feed_default(tmp_path):
     assert feed_url == "http://localhost:5000/feed.xml"
     assert (tmp_path / "data" / "audio" / "2026-06-13-article-title.mp3").exists()
     assert (tmp_path / "data" / "feed.xml").exists()
+
+
+# --- episode rotation + size check --------------------------------------------
+
+
+def test_rotation_removes_oldest_episode_from_remote(tmp_path, bare_repo):
+    """max_episodes=2 deletes oldest MP3 from gh-pages and drops it from feed."""
+    import xml.etree.ElementTree as ET
+
+    work_dir = tmp_path / "clone"
+    e_old = _episode(
+        title="Old Article",
+        published=datetime(2026, 1, 1, tzinfo=UTC),
+        public_url="https://testuser.github.io/testrepo/audio/2026-01-01-old-article.mp3",
+    )
+    e_mid = _episode(
+        title="Mid Article",
+        published=datetime(2026, 3, 1, tzinfo=UTC),
+        public_url="https://testuser.github.io/testrepo/audio/2026-03-01-mid-article.mp3",
+    )
+    e_new = _episode()
+
+    old_src = tmp_path / "old.mp3"
+    old_src.write_bytes(b"old-audio")
+    mid_src = tmp_path / "mid.mp3"
+    mid_src.write_bytes(b"mid-audio")
+    new_src = tmp_path / "new.mp3"
+    new_src.write_bytes(b"new-audio")
+
+    # Seed remote with two episodes (no rotation limit yet)
+    seed_pub = GitHubPagesPublisher(
+        repo="testuser/testrepo",
+        token="",
+        work_dir=work_dir,
+        feed_config=FEED_CONFIG,
+        remote_url=str(bare_repo),
+    )
+    run(seed_pub.publish_and_update_feed(e_old, old_src, [e_old]))
+    run(seed_pub.publish_and_update_feed(e_mid, mid_src, [e_old, e_mid]))
+    assert _show(bare_repo, "audio/2026-01-01-old-article.mp3") == b"old-audio"
+
+    # Publisher with max_episodes=2, reuses same work_dir clone
+    rotating_pub = GitHubPagesPublisher(
+        repo="testuser/testrepo",
+        token="",
+        work_dir=work_dir,
+        feed_config=FEED_CONFIG,
+        remote_url=str(bare_repo),
+        max_episodes=2,
+    )
+    run(rotating_pub.publish_and_update_feed(e_new, new_src, [e_old, e_mid, e_new]))
+
+    # e_old MP3 removed; e_mid and e_new present
+    with pytest.raises(subprocess.CalledProcessError):
+        _show(bare_repo, "audio/2026-01-01-old-article.mp3")
+    assert _show(bare_repo, "audio/2026-03-01-mid-article.mp3") == b"mid-audio"
+    assert _show(bare_repo, "audio/2026-06-13-article-title.mp3") == b"new-audio"
+
+    # Feed has exactly 2 items
+    items = ET.fromstring(_show(bare_repo, "feed.xml").decode()).findall("channel/item")
+    assert len(items) == 2
+
+
+def test_size_check_rejects_before_push(tmp_path, bare_repo):
+    """Exceeding max_size_mb raises GitHubPagesPublisherError; remote stays untouched."""
+    publisher = GitHubPagesPublisher(
+        repo="testuser/testrepo",
+        token="",
+        work_dir=tmp_path / "clone",
+        feed_config=FEED_CONFIG,
+        remote_url=str(bare_repo),
+        max_size_mb=1,
+    )
+    episode = _episode()
+    big_audio = tmp_path / "big.mp3"
+    big_audio.write_bytes(b"x" * (1 * 1024 * 1024 + 1))  # 1 MB + 1 byte
+
+    with pytest.raises(GitHubPagesPublisherError, match="exceeds"):
+        run(publisher.publish_and_update_feed(episode, big_audio, [episode]))
+
+    with pytest.raises(subprocess.CalledProcessError):
+        _show(bare_repo, "audio/2026-06-13-article-title.mp3")

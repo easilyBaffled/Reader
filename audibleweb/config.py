@@ -48,6 +48,8 @@ class PublisherConfig:
     repo: str = "username/audibleweb-feed"
     branch: str = "gh-pages"
     token: str = ""  # GITHUB_PAT in .env
+    max_episodes: int = 0  # 0 = unlimited; rotate out oldest when exceeded
+    max_size_mb: int = 900  # GitHub Pages recommended limit; 0 = no check
 
 
 @dataclass

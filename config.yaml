@@ -16,6 +16,8 @@ publisher:
   type: github_pages
   repo: "username/audibleweb-feed"
   branch: "gh-pages"
+  max_episodes: 0     # 0 = unlimited; set to rotate out oldest episodes
+  max_size_mb: 900    # GitHub Pages recommended limit; 0 = no size check
 
 extraction:
   jina_fallback: true
