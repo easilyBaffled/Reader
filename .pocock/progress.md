@@ -10,6 +10,31 @@ This file maintains context between autonomous iterations.
 <!-- This section is a rolling window - keep only the last 3 entries -->
 <!-- Move older entries to archive.md -->
 
+### Iteration: reader-8f2.15 [build-5c] extractors/rss.py: RSS feed import (closed)
+Also closed: reader-8f2.7 (REST API) and reader-8hb (heartbeat) — both were already
+fully implemented in prior iterations, just not marked done.
+
+New `audibleweb/extractors/rss.py`. 15 new tests (225 total). Added feedparser dep.
+
+Key decisions:
+- `RSSImportExtractor.list_articles(feed_url) -> list[Article]` is the primary API
+  (not `extract()`) — RSS is multi-article. `extract()` returns first article for
+  Protocol compliance; queue wiring (reader-8f2.10) should call `list_articles()`.
+- `can_handle()` heuristic: URL starts with http/https AND contains an RSS/feed/atom
+  URL pattern (/rss, /feed, /atom, .xml, etc). No network call for routing.
+- Fetch via httpx async, parse via `feedparser.parse(content_string)` (not feedparser's
+  own fetch — keeps async flow consistent with other extractors).
+- HTML stripping: `re.sub(r"<[^>]+>", " ", html)` — lightweight, no extra dep.
+  feedparser already sanitizes most HTML; this is a final safety net.
+- `content:encoded` preferred over `<description>` when present — full article body
+  vs summary. `entry.get("content")[0]["value"]` for content:encoded via feedparser.
+- Short entries (summary < 100 chars after strip) silently skipped via make_article
+  raising ExtractionError — consistent with other extractors' min content policy.
+- Tests: inline XML fixture strings + httpx.MockTransport; no network, no temp files.
+
+Files: audibleweb/extractors/rss.py (new), tests/test_rss_extractor.py (new, 15 tests),
+pyproject.toml (+feedparser>=6.0.12).
+
 ### Iteration: reader-8f2.1 [build-3] Vendor lib/cleaning.py Stage 1+3 text cleaning (closed)
 New `audibleweb/lib/cleaning.py`. 11 new tests (210 total). No new deps.
 
@@ -40,23 +65,6 @@ Files: audibleweb/pipeline/queue.py (new), audibleweb/api/routes.py (+cleanup ca
 audibleweb/worker.py (+fail_job import, +data_dir param, except→fail_job not re-raise),
 tests/test_api.py (+chunk dir cleanup test), tests/test_worker.py (+fail_job test).
 
-### Iteration: reader-8f2.13 [build-11] Plugin discovery for plugins/{extractors,engines,publishers}/ (closed)
-New `audibleweb/plugins.py`. `PluginRegistry` pre-loaded with built-ins; `load(plugins_dir)` adds
-user plugins. `create_app()` gains optional `plugins_dir` param; registry stored in
-`app.extensions["plugin_registry"]`. 12 new tests (197 total). No new deps.
-
-Key decisions:
-- Protocol detection via `__protocol_attrs__` (Python 3.12 feature on `runtime_checkable` Protocols).
-  `"__protocol_attrs__" in cls.__dict__` = True for Protocol classes (skip them),
-  False for concrete classes (check attrs). Structural check without explicit inheritance.
-- `obj.__module__ == module.__name__` filters out re-imported classes from other modules.
-  Module loaded with `spec_from_file_location("_plugin_{stem}", path)` so name is deterministic.
-- Registry stores **classes** (not instances) because built-in constructors need config args
-  (`KokoroEngine(base_url, api_key, max_parallel)`). Instantiation remains caller's
-  responsibility. `build_tts_engine()` unchanged — plugin engine instantiation is future work
-  once more engines exist.
-- `create_app()` loads registry BEFORE `build_tts_engine()` so registry is populated;
-  passes `plugins_dir=None` in tests to use empty default (or pass tmp_path for fixture plugins).
 - `plugins/{extractors,engines,publishers}/` created with `.gitkeep` to track in git.
 
 Files: audibleweb/plugins.py (new), audibleweb/app.py (+PluginRegistry load, +plugins_dir param),
