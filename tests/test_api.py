@@ -224,6 +224,19 @@ def test_delete_job_removes_audio_file(app, client, tmp_path):
     assert not audio_path.exists()
 
 
+def test_delete_job_removes_chunk_dir(app, client):
+    data_dir = app.config["DB_PATH"].parent
+    chunk_dir = data_dir / "jobs" / "job-1"
+    chunk_dir.mkdir(parents=True)
+    (chunk_dir / "chunk_000.wav").write_bytes(b"fake wav")
+    _insert_job(app, "job-1", status="generating")
+
+    resp = client.delete("/api/jobs/job-1")
+
+    assert resp.status_code == 204
+    assert not chunk_dir.exists()
+
+
 def test_delete_job_not_found(client):
     resp = client.delete("/api/jobs/missing")
 

@@ -17,6 +17,7 @@ from pathlib import Path
 from audibleweb.core.pipeline import run_pipeline
 from audibleweb.db import get_connection
 from audibleweb.log import set_job_id
+from audibleweb.pipeline.queue import fail_job
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +61,13 @@ class Worker:
         self._stop_event = asyncio.Event()
         self._ready.set()
 
+        data_dir = Path(self.db_path).parent
         conn = get_connection(self.db_path)
         try:
             while not self._stop_event.is_set():
                 job_id = _claim_next_job(conn)
                 if job_id is not None:
-                    await _run_with_heartbeat(conn, job_id)
+                    await _run_with_heartbeat(conn, job_id, data_dir)
                     continue
                 try:
                     await asyncio.wait_for(
@@ -80,6 +82,7 @@ class Worker:
 async def _run_with_heartbeat(
     conn: sqlite3.Connection,
     job_id: str,
+    data_dir: Path,
     heartbeat_interval: float = HEARTBEAT_INTERVAL_SEC,
 ) -> None:
     set_job_id(job_id)
@@ -96,9 +99,9 @@ async def _run_with_heartbeat(
             heartbeat_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await heartbeat_task
-    except Exception:
+    except Exception as exc:
         logger.exception("job failed")
-        raise
+        fail_job(conn, job_id, str(exc), data_dir)
     finally:
         set_job_id(None)
 

@@ -4,6 +4,45 @@ Older iteration entries moved out of progress.md's rolling window.
 
 ---
 
+### Iteration: reader-n19 [eng-T4] Cooperative pause check + weighted-blend fallback (closed)
+Added `check_cancel` callback to `KokoroEngine.synthesize()` + weighted-blend
+partial-failure fallback. 4 new tests (179 total). No new deps.
+
+Key decisions:
+- `check_cancel: Callable[[], Awaitable[None]] | None = None` kwarg on `synthesize()`.
+  Called after synthesis completes (before return). Caller awaits it; if job is
+  paused/cancelled, caller raises (typically `asyncio.CancelledError`) — propagates
+  naturally. "Skip already-done chunks on resume" is queue.py behavior (reader-8f2.10).
+- Weighted blend refactored into `_synthesize_weighted()`. Uses
+  `asyncio.gather(return_exceptions=True)`. Primary fallback = voice_a (first in spec).
+  Both fail → raises `KokoroEngineError`.
+- Protocol in `base.py` updated to match new `synthesize()` signature.
+
+Files: audibleweb/engines/kokoro.py (modified), audibleweb/engines/base.py (modified),
+tests/test_kokoro.py (+4 tests).
+
+### Iteration: reader-fco [eng-T5] Episode rotation + pre-push MP3 size check (closed)
+Added `_apply_rotation()` + `_check_audio_size()` to `GitHubPagesPublisher`.
+2 new tests (175 total). No new deps.
+
+Key decisions:
+- `max_episodes: int = 0` (0=unlimited) + `max_size_mb: int = 0` (0=no check).
+- Both methods run BEFORE `_commit_and_push` → remote always untouched on failure.
+
+Files: audibleweb/publishers/github_pages.py (modified), audibleweb/config.py,
+config.yaml, tests/test_publishers.py (+2 tests).
+
+### Iteration: reader-8f2.7.1 [build-1a sub] GET/PUT /api/settings endpoint (closed)
+Added `GET /api/settings` + `PUT /api/settings` to `audibleweb/api/routes.py`.
+10 new tests (173 total). No new deps (yaml already present via pyyaml).
+
+Key decisions:
+- Secrets stripped from GET response + PUT body. `_SECTION_CLASSES` + `_SECRET_FIELDS`
+  module-level dicts. PUT validates via dataclass construction → TypeError → 400.
+
+Files: audibleweb/api/routes.py (new), audibleweb/app.py (+config_path param),
+tests/test_api.py (new).
+
 ### Iteration: reader-ksd [ceo-T4] Atomic single-push publish workflow (closed)
 Added `publish_and_update_feed(episode, audio_path, all_episodes) -> tuple[str, str]`
 to Publisher Protocol in `base.py` + concrete implementations in both publishers.

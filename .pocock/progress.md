@@ -10,6 +10,22 @@ This file maintains context between autonomous iterations.
 <!-- This section is a rolling window - keep only the last 3 entries -->
 <!-- Move older entries to archive.md -->
 
+### Iteration: reader-lvy [ceo-T6] Cleanup orphaned audio chunks on delete/final-fail (closed)
+New `audibleweb/pipeline/queue.py`. 2 new tests (199 total). No new deps.
+
+Key decisions:
+- Chunk dir convention: `data_dir / "jobs" / job_id`. `data_dir` derived as `Path(db_path).parent`
+  in both routes.py and worker.py — keeps dir co-located with DB.
+- `cleanup_job_audio(data_dir, job_id)` → `shutil.rmtree` if dir exists (idempotent).
+- `fail_job(conn, job_id, error, data_dir)` → UPDATE status='failed' + cleanup in one call.
+  Called from worker.py's `_run_with_heartbeat` except block. Also changed: worker no longer
+  re-raises on pipeline failure (was killing the worker loop); now marks failed + continues.
+- Routes.py `delete_job` calls `cleanup_job_audio` before DELETE, AFTER mp3 unlink.
+
+Files: audibleweb/pipeline/queue.py (new), audibleweb/api/routes.py (+cleanup call),
+audibleweb/worker.py (+fail_job import, +data_dir param, except→fail_job not re-raise),
+tests/test_api.py (+chunk dir cleanup test), tests/test_worker.py (+fail_job test).
+
 ### Iteration: reader-8f2.13 [build-11] Plugin discovery for plugins/{extractors,engines,publishers}/ (closed)
 New `audibleweb/plugins.py`. `PluginRegistry` pre-loaded with built-ins; `load(plugins_dir)` adds
 user plugins. `create_app()` gains optional `plugins_dir` param; registry stored in
@@ -57,75 +73,6 @@ audibleweb/app.py (+setup_logging call in main), audibleweb/worker.py
 (+set_job_id around run_pipeline + logger calls), audibleweb/api/routes.py
 (+LoggingConfig to _SECTION_CLASSES), config.yaml (+logging section),
 tests/test_logging.py (new, 4 tests), tests/test_api.py (+logging to expected sections).
-
-### Iteration: reader-n19 [eng-T4] Cooperative pause check + weighted-blend fallback (closed)
-Added `check_cancel` callback to `KokoroEngine.synthesize()` + weighted-blend
-partial-failure fallback. 4 new tests (179 total). No new deps.
-
-Key decisions:
-- `check_cancel: Callable[[], Awaitable[None]] | None = None` kwarg on `synthesize()`.
-  Called after synthesis completes (before return). Caller awaits it; if job is
-  paused/cancelled, caller raises (typically `asyncio.CancelledError`) — propagates
-  naturally. "Skip already-done chunks on resume" is queue.py behavior (reader-8f2.10),
-  not engine behavior — engine just provides the hook.
-- Weighted blend refactored into `_synthesize_weighted()`. Uses
-  `asyncio.gather(return_exceptions=True)` — if one voice fails, returns the
-  surviving voice's audio alone; if both fail, raises `KokoroEngineError`.
-  Primary fallback = voice_a (first in spec). voice_b fail → returns buf_a directly
-  (no extra TTS call). voice_a fail → returns buf_b. Both fail → raises.
-- Protocol in `base.py` updated to match new `synthesize()` signature.
-
-Files: audibleweb/engines/kokoro.py (modified, +_synthesize_weighted),
-audibleweb/engines/base.py (modified, +check_cancel to Protocol),
-tests/test_kokoro.py (+4 tests).
-
-### Iteration: reader-fco [eng-T5] Episode rotation + pre-push MP3 size check (closed)
-Added `_apply_rotation()` + `_check_audio_size()` to `GitHubPagesPublisher`.
-2 new tests (175 total). No new deps.
-
-Key decisions:
-- `max_episodes: int = 0` (0=unlimited) + `max_size_mb: int = 0` (0=no check) added
-  to constructor; production passes `config.publisher.max_episodes/max_size_mb`.
-  `PublisherConfig` defaults: max_episodes=0, max_size_mb=900.
-- `_apply_rotation`: sorts episodes by published desc, keeps newest N, `unlink()`s
-  excess MP3s from `work_dir/audio/` (skips if file doesn't exist).
-- `_check_audio_size`: sums `work_dir/audio/*.mp3` sizes; raises
-  `GitHubPagesPublisherError` if > limit_bytes. Called AFTER _apply_rotation so
-  rotation reduces size first.
-- Both methods wired into `publish_and_update_feed()` AND `update_feed()`.
-  Both run BEFORE `_commit_and_push` → remote always untouched on failure
-  (all-or-nothing rule satisfied).
-- Did NOT clean up copied MP3 from work_dir on size failure — remote untouched
-  is the invariant, work_dir is just a local clone that can be re-cloned.
-
-Files: audibleweb/publishers/github_pages.py (modified, +2 methods),
-audibleweb/config.py (+max_episodes/max_size_mb to PublisherConfig),
-config.yaml (+max_episodes/max_size_mb to publisher section),
-tests/test_publishers.py (+2 tests).
-
-### Iteration: reader-8f2.7.1 [build-1a sub] GET/PUT /api/settings endpoint (closed)
-Added `GET /api/settings` + `PUT /api/settings` to `audibleweb/api/routes.py`.
-10 new tests (173 total). No new deps (yaml already present via pyyaml).
-
-Key decisions:
-- `app.config["CONFIG_PATH"]` stores the resolved config path so the settings
-  endpoint can write back config.yaml without hardcoding. `create_app()` gains
-  an optional `config_path` param; defaults to `DEFAULT_CONFIG_PATH` from config.py.
-  Tests pass `tmp_path / "config.yaml"` for full isolation.
-- GET: `dataclasses.asdict(config)` then `_strip_secrets()` removes the 5
-  secret fields (publisher.token, tts.api_key, extraction.jina_api_key,
-  normalization.llm_api_key, server.api_key). Secrets live in .env only.
-- PUT: body validated (must be dict, known sections only, each value a dict).
-  Secrets stripped silently from incoming body. Merges into current raw yaml
-  dict, validates merged result by constructing each affected section's
-  dataclass — TypeError on unknown fields → 400. Writes yaml.safe_dump,
-  calls load_config(), updates current_app.config["APP_CONFIG"].
-- `_SECTION_CLASSES` + `_SECRET_FIELDS` are module-level dicts in routes.py
-  to keep secret-stripping logic co-located with the endpoint.
-
-Files: audibleweb/api/__init__.py (staged, pre-existing untracked),
-audibleweb/api/routes.py (new/staged), audibleweb/app.py (modified,
-+config_path param + CONFIG_PATH in app.config), tests/test_api.py (new/staged).
 
 ---
 

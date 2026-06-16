@@ -1,6 +1,7 @@
 import time
 
 from audibleweb.db import get_connection, migrate
+from audibleweb.pipeline.queue import fail_job
 from audibleweb.worker import Worker
 
 
@@ -56,3 +57,23 @@ def test_worker_graceful_shutdown(tmp_path):
     worker.stop()
 
     assert not worker._thread.is_alive()
+
+
+def test_fail_job_removes_chunk_dir(tmp_path):
+    db_path = tmp_path / "test.db"
+    conn = get_connection(db_path)
+    migrate(conn)
+    _insert_job(conn, "job-1")
+
+    chunk_dir = tmp_path / "jobs" / "job-1"
+    chunk_dir.mkdir(parents=True)
+    (chunk_dir / "chunk_000.wav").write_bytes(b"fake wav")
+
+    fail_job(conn, "job-1", "synthesis error", tmp_path)
+
+    assert not chunk_dir.exists()
+    row = conn.execute(
+        "SELECT status, error FROM jobs WHERE id = ?", ("job-1",)
+    ).fetchone()
+    assert row["status"] == "failed"
+    assert row["error"] == "synthesis error"

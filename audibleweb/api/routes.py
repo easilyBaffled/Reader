@@ -30,6 +30,7 @@ import httpx
 import yaml
 from flask import Blueprint, current_app, jsonify, request
 
+from audibleweb.pipeline.queue import cleanup_job_audio
 from audibleweb.config import (
     ExtractionConfig,
     FeedConfig,
@@ -200,6 +201,9 @@ def delete_job(job_id: str):
 
         if row["audio_path"]:
             Path(row["audio_path"]).unlink(missing_ok=True)
+
+        data_dir = Path(current_app.config["DB_PATH"]).parent
+        cleanup_job_audio(data_dir, job_id)
 
         conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
         conn.commit()
