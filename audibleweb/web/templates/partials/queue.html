@@ -1,0 +1,136 @@
+{% from 'macros.html' import icon, status_badge %}
+
+{# Quick-add input #}
+<div class="quick-add">
+  <form class="quick-add-form"
+        hx-post="/web/jobs"
+        hx-target="#main-content"
+        hx-swap="innerHTML">
+    <input type="hidden" name="input_type" value="url">
+    <input class="quick-add-input"
+           type="text"
+           name="input_value"
+           placeholder="Paste a URL, or drop a PDF/TXT/MD file..."
+           aria-label="URL or content to convert">
+    <button type="submit" class="btn btn-primary">
+      {{ icon('upload') }} Add
+    </button>
+  </form>
+</div>
+
+{% if error is defined and error %}
+<div class="banner banner-error" role="alert">
+  {{ icon('x-circle') }} {{ error }}
+</div>
+{% endif %}
+
+{# Job list #}
+{% if jobs is not defined or jobs | length == 0 %}
+  <div class="empty-state" id="job-list">
+    <p>Paste a URL above to create your first episode</p>
+  </div>
+{% else %}
+  <div class="job-list" id="job-list">
+    {# Active job (first in-progress job, if any) #}
+    {% set active_statuses = ('extracting', 'normalizing', 'generating', 'publishing') %}
+    {% set active_job = namespace(found=none) %}
+    {% for job in jobs %}
+      {% if job.status in active_statuses and active_job.found is none %}
+        {% set active_job.found = job %}
+      {% endif %}
+    {% endfor %}
+
+    {% if active_job.found %}
+      {% set job = active_job.found %}
+      <article class="job-card job-card-active" id="job-{{ job.id }}">
+        <div class="job-card-header">
+          <div class="job-title">{{ job.title or job.input_value }}</div>
+          <div class="job-actions">
+            {{ status_badge(job.status) }}
+            <button class="btn-icon"
+                    hx-post="/api/jobs/{{ job.id }}/pause"
+                    hx-target="#job-{{ job.id }}"
+                    hx-swap="outerHTML"
+                    aria-label="Pause job">
+              {{ icon('pause') }}
+            </button>
+          </div>
+        </div>
+
+        {% set stage_labels = {
+          'extracting':  'Extracting article...',
+          'normalizing': 'Normalizing text...',
+          'generating':  'Generating audio...',
+          'publishing':  'Publishing to feed...',
+        } %}
+        <div class="progress-wrap">
+          <div class="progress-track">
+            <div class="progress-fill" style="width: 33%"></div>
+          </div>
+          <div class="progress-meta">
+            <span>{{ stage_labels.get(job.status, job.status) }}</span>
+          </div>
+        </div>
+      </article>
+    {% endif %}
+
+    {# Completed / failed / queued rows #}
+    {% for job in jobs %}
+      {% if job.status not in active_statuses or job.id != (active_job.found.id if active_job.found else '') %}
+        <article class="job-card job-card-compact" id="job-{{ job.id }}">
+          <div class="job-card-header">
+            <div>
+              <div class="job-title">{{ job.title or job.input_value }}</div>
+              <div class="job-meta">
+                {% if job.audio_duration_sec %}
+                  <span class="mono">{{ "%.0f"|format(job.audio_duration_sec // 60) }}m {{ "%.0f"|format(job.audio_duration_sec % 60) }}s</span>
+                {% endif %}
+                {% if job.word_count %}
+                  <span>{{ job.word_count }} words</span>
+                {% endif %}
+                {% if job.error %}
+                  <span style="color: var(--error); font-size: 13px;">{{ job.error[:80] }}</span>
+                {% endif %}
+              </div>
+            </div>
+            <div class="job-actions">
+              {{ status_badge(job.status) }}
+              {% if job.status == 'done' and job.public_url %}
+                <a href="{{ job.public_url }}" target="_blank" rel="noopener"
+                   class="btn-icon" aria-label="Play episode">
+                  {{ icon('play') }}
+                </a>
+              {% endif %}
+              {% if job.status == 'failed' %}
+                <button class="btn-icon"
+                        hx-post="/api/jobs/{{ job.id }}/retry"
+                        hx-target="#job-list"
+                        hx-swap="outerHTML"
+                        aria-label="Retry job">
+                  {{ icon('retry') }}
+                </button>
+              {% endif %}
+              {% if job.status == 'paused' %}
+                <button class="btn-icon"
+                        hx-post="/api/jobs/{{ job.id }}/resume"
+                        hx-target="#job-list"
+                        hx-swap="outerHTML"
+                        aria-label="Resume job">
+                  {{ icon('play') }}
+                </button>
+              {% endif %}
+              <button class="btn-icon"
+                      hx-delete="/api/jobs/{{ job.id }}"
+                      hx-target="#job-{{ job.id }}"
+                      hx-swap="outerHTML"
+                      hx-confirm="Delete this job?"
+                      aria-label="Delete job">
+                {{ icon('delete') }}
+              </button>
+            </div>
+          </div>
+        </article>
+      {% endif %}
+    {% endfor %}
+  </div>
+{% endif %}

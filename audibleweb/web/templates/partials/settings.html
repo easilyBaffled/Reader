@@ -1,0 +1,97 @@
+{% from 'macros.html' import icon %}
+
+{% if saved is defined and saved %}
+<div class="banner banner-success" role="status" id="saved-banner"
+     hx-on::load="setTimeout(() => this.remove(), 3000)">
+  {{ icon('check-circle') }} Settings saved.
+</div>
+{% endif %}
+
+{% if save_error is defined and save_error %}
+<div class="banner banner-error" role="alert">
+  {{ icon('x-circle') }} {{ save_error }}
+</div>
+{% endif %}
+
+<form hx-put="/api/settings"
+      hx-target="this"
+      hx-swap="outerHTML">
+
+  <section class="settings-section">
+    <h2>Feed</h2>
+    <div class="form-row">
+      <label class="form-label" for="feed-title">Title</label>
+      <input class="form-input" type="text" id="feed-title" name="feed[title]"
+             value="{{ config.feed.title if config else '' }}"
+             placeholder="My Reading Feed">
+    </div>
+    <div class="form-row">
+      <label class="form-label" for="feed-description">Description</label>
+      <input class="form-input" type="text" id="feed-description" name="feed[description]"
+             value="{{ config.feed.description if config else '' }}"
+             placeholder="Articles converted to audio">
+    </div>
+  </section>
+
+  <section class="settings-section">
+    <h2>Voice</h2>
+    <div class="form-row">
+      <label class="form-label" for="voice-default">Default voice</label>
+      <input class="form-input" type="text" id="voice-default" name="voice[default]"
+             value="{{ config.voice.default if config else 'af_heart' }}"
+             placeholder="af_heart">
+    </div>
+    <div class="form-row">
+      <label class="form-label" for="voice-speed">Speed (0.5–2.0)</label>
+      <input class="form-input" type="number" id="voice-speed" name="voice[speed]"
+             value="{{ config.voice.speed if config else 1.0 }}"
+             min="0.5" max="2.0" step="0.1">
+    </div>
+  </section>
+
+  <section class="settings-section">
+    <h2>TTS Engine</h2>
+    <div class="form-row">
+      <label class="form-label" for="tts-base-url">API base URL</label>
+      <input class="form-input" type="text" id="tts-base-url" name="tts[base_url]"
+             value="{{ config.tts.base_url if config else 'http://localhost:8880/v1' }}"
+             placeholder="http://localhost:8880/v1">
+    </div>
+    <div class="form-row">
+      <label class="form-label" for="tts-max-parallel">Max parallel requests</label>
+      <input class="form-input" type="number" id="tts-max-parallel" name="tts[max_parallel]"
+             value="{{ config.tts.max_parallel if config else 4 }}"
+             min="1" max="16">
+    </div>
+  </section>
+
+  <section class="settings-section">
+    <h2>Pronunciation Overrides</h2>
+    <div id="pronunciations-list"
+         hx-get="/api/pronunciations"
+         hx-trigger="load"
+         hx-swap="innerHTML">
+      <div class="skeleton skeleton-row"></div>
+    </div>
+
+    <div class="quick-add" style="margin-top: var(--space-base)">
+      <form class="quick-add-form"
+            hx-put="/api/pronunciations"
+            hx-target="#pronunciations-list"
+            hx-swap="innerHTML">
+        <input class="quick-add-input" type="text" name="word"
+               placeholder="Word (e.g. Kubernetes)" aria-label="Word">
+        <input class="quick-add-input" type="text" name="replacement"
+               placeholder="Pronunciation (e.g. Koo-ber-net-eez)" aria-label="Pronunciation">
+        <button type="submit" class="btn btn-ghost">Add</button>
+      </form>
+    </div>
+  </section>
+
+  <div style="margin-top: var(--space-xl)">
+    <button type="submit" class="btn btn-primary">
+      {{ icon('check-circle') }} Save settings
+    </button>
+  </div>
+
+</form>

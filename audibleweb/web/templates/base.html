@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AudibleWeb</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
+</head>
+<body class="app-layout" hx-boost="false">
+
+  <header class="app-header">
+    <h1>AudibleWeb</h1>
+  </header>
+
+  <nav class="tab-bar" id="tab-bar" aria-label="Main navigation">
+    {% set tabs = [
+      ('queue',    'Queue',    'inbox'),
+      ('inbox',    'Inbox',    'upload'),
+      ('feed',     'Feed',     'rss'),
+      ('settings', 'Settings', 'settings'),
+    ] %}
+    {% from 'macros.html' import icon %}
+    {% for tab_id, tab_label, tab_icon in tabs %}
+    <a href="/tab/{{ tab_id }}"
+       class="tab-link{% if active_tab == tab_id %} active{% endif %}"
+       data-tab="{{ tab_id }}"
+       hx-get="/tab/{{ tab_id }}"
+       hx-target="#main-content"
+       hx-swap="innerHTML transition:true"
+       hx-push-url="/tab/{{ tab_id }}"
+       aria-current="{% if active_tab == tab_id %}page{% else %}false{% endif %}">
+      {{ icon(tab_icon) }}
+      {{ tab_label }}
+    </a>
+    {% endfor %}
+  </nav>
+
+  <main class="app-main">
+    <div id="main-content">
+      {% block main %}{% endblock %}
+    </div>
+  </main>
+
+  <!-- Full-page drag-drop overlay -->
+  <div class="drop-overlay" id="drop-overlay" role="status" aria-live="polite">
+    <div class="drop-overlay-text" id="drop-overlay-text">Drop file to create episode</div>
+    <div style="font-size: 13px; color: var(--text-muted);">PDF, TXT, or MD</div>
+  </div>
+
+  <script>
+    // Drag-drop overlay
+    let dragDepth = 0;
+    const overlay = document.getElementById('drop-overlay');
+    const overlayText = document.getElementById('drop-overlay-text');
+    const ACCEPTED = new Set(['application/pdf', 'text/plain', 'text/markdown',
+                              'text/x-markdown']);
+
+    document.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      dragDepth++;
+      overlay.classList.add('active');
+      const type = e.dataTransfer?.items?.[0]?.type;
+      const valid = type && (ACCEPTED.has(type) || type === '' /* unknown, allow */);
+      overlayText.textContent = valid !== false
+        ? 'Drop file to create episode'
+        : 'Unsupported file type';
+      overlayText.classList.toggle('invalid', valid === false);
+    });
+
+    document.addEventListener('dragleave', (e) => {
+      dragDepth--;
+      if (dragDepth === 0) overlay.classList.remove('active');
+    });
+
+    document.addEventListener('dragover', (e) => { e.preventDefault(); });
+
+    document.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dragDepth = 0;
+      overlay.classList.remove('active');
+      const file = e.dataTransfer?.files?.[0];
+      if (!file) return;
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('input_type', 'file');
+      fd.append('input_value', file.name);
+      htmx.ajax('POST', '/web/jobs', {target: '#main-content', swap: 'innerHTML',
+                                       values: {input_type: 'file', input_value: file.name}});
+    });
+
+    // Tab active state update on HTMX swap
+    document.addEventListener('htmx:afterSettle', (e) => {
+      if (e.detail.target && e.detail.target.id === 'main-content') {
+        const path = e.detail.requestConfig?.path || '';
+        const match = path.match(/\/tab\/(\w+)/);
+        if (match) {
+          document.querySelectorAll('.tab-link').forEach((link) => {
+            const active = link.dataset.tab === match[1];
+            link.classList.toggle('active', active);
+            link.setAttribute('aria-current', active ? 'page' : 'false');
+          });
+        }
+      }
+    });
+  </script>
+</body>
+</html>

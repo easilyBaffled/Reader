@@ -1,0 +1,60 @@
+{% from 'macros.html' import icon, status_badge %}
+
+{% if episodes is defined and episodes | length > 0 %}
+  <div class="feed-url-bar">
+    {{ icon('rss') }}
+    <span id="feed-url-text">{{ feed_url or 'Feed URL not configured' }}</span>
+    {% if feed_url %}
+      <button class="btn-icon"
+              onclick="navigator.clipboard.writeText('{{ feed_url }}')"
+              aria-label="Copy feed URL">
+        {{ icon('copy') }}
+      </button>
+    {% endif %}
+  </div>
+
+  <div class="job-list">
+    {% for ep in episodes %}
+      <article class="job-card job-card-compact">
+        <div class="job-card-header">
+          <div>
+            <div class="job-title">{{ ep.title or ep.input_value }}</div>
+            <div class="job-meta">
+              {% if ep.audio_duration_sec %}
+                <span class="mono">{{ "%.0f"|format(ep.audio_duration_sec // 60) }}m {{ "%.0f"|format(ep.audio_duration_sec % 60) }}s</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="job-actions">
+            {{ status_badge(ep.status) }}
+            {% if ep.public_url %}
+              <a href="{{ ep.public_url }}" target="_blank" rel="noopener"
+                 class="btn-icon" aria-label="Play episode">
+                {{ icon('play') }}
+              </a>
+            {% endif %}
+            <button class="btn-icon"
+                    hx-delete="/api/jobs/{{ ep.id }}"
+                    hx-target="closest article"
+                    hx-swap="outerHTML"
+                    hx-confirm="Remove this episode from your feed?"
+                    aria-label="Delete episode">
+              {{ icon('delete') }}
+            </button>
+          </div>
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="empty-state">
+    <p>No episodes published yet. Process a job first.</p>
+    <a href="/tab/inbox"
+       class="btn btn-ghost"
+       hx-get="/tab/inbox"
+       hx-target="#main-content"
+       hx-swap="innerHTML">
+      Go to Inbox
+    </a>
+  </div>
+{% endif %}

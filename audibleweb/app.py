@@ -9,6 +9,7 @@ from pathlib import Path
 from flask import Flask
 
 from audibleweb.api.routes import api_bp
+from audibleweb.web.routes import web_bp
 from audibleweb.config import DEFAULT_CONFIG_PATH, AppConfig, load_config
 from audibleweb.db import get_connection, migrate
 from audibleweb.engines.base import TTSEngine
@@ -62,6 +63,7 @@ def create_app(
 
     app.extensions["tts_engine"] = tts_engine or build_tts_engine(config)
     app.register_blueprint(api_bp)
+    app.register_blueprint(web_bp)
 
     @app.get("/healthz")
     def healthz():

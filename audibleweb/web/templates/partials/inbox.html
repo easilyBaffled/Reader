@@ -1,0 +1,33 @@
+{% from 'macros.html' import icon %}
+
+{# Quick-add input #}
+<div class="quick-add">
+  <form class="quick-add-form"
+        hx-post="/web/jobs"
+        hx-target="#main-content"
+        hx-swap="innerHTML">
+    <input type="hidden" name="input_type" value="url">
+    <input class="quick-add-input"
+           type="text"
+           name="input_value"
+           placeholder="Paste a URL, or drop a PDF/TXT/MD file..."
+           aria-label="URL or content to convert"
+           autofocus>
+    <button type="submit" class="btn btn-primary">
+      {{ icon('upload') }} Add
+    </button>
+  </form>
+  {% if error is defined and error %}
+    <p class="field-error" role="alert">{{ error }}</p>
+  {% endif %}
+</div>
+
+{% if success is defined and success %}
+<div class="banner banner-success" role="status">
+  {{ icon('check-circle') }} Job created — switching to Queue...
+</div>
+{% endif %}
+
+<div class="empty-state">
+  <p>Paste a URL above or drag and drop a PDF, TXT, or MD file anywhere on the page to create an episode.</p>
+</div>

@@ -10,6 +10,33 @@ This file maintains context between autonomous iterations.
 <!-- This section is a rolling window - keep only the last 3 entries -->
 <!-- Move older entries to archive.md -->
 
+### Iteration: reader-8f2.8 [build-1b] Web UI: Jinja templates + DESIGN.md tokens (closed)
+New `audibleweb/web/` blueprint + `audibleweb/static/css/`. 25 new tests (254 total). No new deps.
+
+Key decisions:
+- Static files go in `audibleweb/static/css/` (app-level static), NOT a blueprint static
+  folder. Blueprint `static_url_path='/static'` conflicts with Flask app-level `/static`
+  route (app-level wins); app-level static dir resolves to `audibleweb/static/` correctly.
+- `audibleweb/web/routes.py` = Blueprint("web") with `template_folder="templates"` only.
+  Routes: `GET /` (index, Queue default), `GET /tab/<name>` (HTMX swap target, 4 tabs),
+  `POST /web/jobs` (form → create job → return Queue partial).
+- Jinja macros in `templates/macros.html`: `icon(name)` (13 Lucide SVG paths inline) +
+  `status_badge(status)` (pill with color + icon by status). Used via `{% from %}` import.
+- HTMX tab switching: `hx-get="/tab/{name}"` + `hx-target="#main-content"` on each tab
+  link. Tab active state updated via `htmx:afterSettle` listener in base.html — tiny
+  inline script, not a framework.
+- Drag-drop overlay: full-page, JS dragenter/dragleave/drop handlers in base.html.
+  `dragDepth` counter handles nested drag events correctly. Calls `htmx.ajax` for file drop.
+- `_job_to_dict` imported from `api/routes.py` — web routes reuse API's stall-detection
+  logic without duplicating it.
+
+Files: audibleweb/web/__init__.py (new), audibleweb/web/routes.py (new),
+audibleweb/web/templates/base.html, index.html, macros.html,
+partials/queue.html, partials/inbox.html, partials/feed.html, partials/settings.html (all new),
+audibleweb/static/css/tokens.css (new, exact from DESIGN.md sec1),
+audibleweb/static/css/app.css (new), audibleweb/app.py (register web_bp),
+tests/test_web_ui.py (new, 25 tests).
+
 ### Iteration: reader-whv [ceo-T2] RSS first-sync: mark existing items seen (closed)
 New `audibleweb/migrations/003_rss_seen.sql`. 4 new tests (229 total). No new deps.
 
@@ -54,20 +81,6 @@ Key decisions:
 
 Files: audibleweb/extractors/rss.py (new), tests/test_rss_extractor.py (new, 15 tests),
 pyproject.toml (+feedparser>=6.0.12).
-
-### Iteration: reader-8f2.1 [build-3] Vendor lib/cleaning.py Stage 1+3 text cleaning (closed)
-New `audibleweb/lib/cleaning.py`. 11 new tests (210 total). No new deps.
-
-Key decisions:
-- `clean_text(text)` = Stage 1: fix non-standard punctuation (curly quotes, ellipsis) + ALL CAPS → lowercase.
-  No numeral conversion — no `num2words` dep, Kokoro handles digits fine, LLM normalization step also helps.
-- `apply_pronunciation_overrides(text, pronunciation)` = Stage 3: whole-word case-insensitive
-  substitution from pronunciation.json flat dict `{word: replacement}`. Called separately in pipeline
-  after LLM normalization.
-- `split_text_preserving_markers` dropped entirely (D10 — single-voice, no chapter/voice markers).
-- No new deps needed; stdlib `re` only.
-
-Files: audibleweb/lib/cleaning.py (new), tests/test_cleaning.py (new, 11 tests).
 
 ---
 
