@@ -10,6 +10,29 @@ This file maintains context between autonomous iterations.
 <!-- This section is a rolling window - keep only the last 3 entries -->
 <!-- Move older entries to archive.md -->
 
+### Iteration: reader-8f2.13 [build-11] Plugin discovery for plugins/{extractors,engines,publishers}/ (closed)
+New `audibleweb/plugins.py`. `PluginRegistry` pre-loaded with built-ins; `load(plugins_dir)` adds
+user plugins. `create_app()` gains optional `plugins_dir` param; registry stored in
+`app.extensions["plugin_registry"]`. 12 new tests (197 total). No new deps.
+
+Key decisions:
+- Protocol detection via `__protocol_attrs__` (Python 3.12 feature on `runtime_checkable` Protocols).
+  `"__protocol_attrs__" in cls.__dict__` = True for Protocol classes (skip them),
+  False for concrete classes (check attrs). Structural check without explicit inheritance.
+- `obj.__module__ == module.__name__` filters out re-imported classes from other modules.
+  Module loaded with `spec_from_file_location("_plugin_{stem}", path)` so name is deterministic.
+- Registry stores **classes** (not instances) because built-in constructors need config args
+  (`KokoroEngine(base_url, api_key, max_parallel)`). Instantiation remains caller's
+  responsibility. `build_tts_engine()` unchanged — plugin engine instantiation is future work
+  once more engines exist.
+- `create_app()` loads registry BEFORE `build_tts_engine()` so registry is populated;
+  passes `plugins_dir=None` in tests to use empty default (or pass tmp_path for fixture plugins).
+- `plugins/{extractors,engines,publishers}/` created with `.gitkeep` to track in git.
+
+Files: audibleweb/plugins.py (new), audibleweb/app.py (+PluginRegistry load, +plugins_dir param),
+plugins/extractors/.gitkeep, plugins/engines/.gitkeep, plugins/publishers/.gitkeep (new),
+tests/test_plugins.py (new, 12 tests).
+
 ### Iteration: reader-rnc [ceo-T3] Structured logging with job_id context and file rotation (closed)
 New `audibleweb/log.py` module. `LoggingConfig` added to `config.py` + `AppConfig`.
 4 new tests (185 total). No new deps (stdlib `logging` + `contextvars`).

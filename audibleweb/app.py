@@ -14,9 +14,11 @@ from audibleweb.db import get_connection, migrate
 from audibleweb.engines.base import TTSEngine
 from audibleweb.engines.kokoro import KokoroEngine
 from audibleweb.log import setup_logging
+from audibleweb.plugins import PluginRegistry
 from audibleweb.worker import Worker
 
 DEFAULT_DB_PATH = Path("data/audibleweb.db")
+DEFAULT_PLUGINS_DIR = Path("plugins")
 DEFAULT_PRONUNCIATION_PATH = Path("pronunciation.json")
 
 
@@ -37,6 +39,7 @@ def create_app(
     tts_engine: TTSEngine | None = None,
     pronunciation_path: str | Path | None = None,
     config_path: str | Path | None = None,
+    plugins_dir: str | Path | None = None,
 ) -> Flask:
     app = Flask(__name__)
 
@@ -53,6 +56,10 @@ def create_app(
     app.config["PRONUNCIATION_PATH"] = Path(
         pronunciation_path or DEFAULT_PRONUNCIATION_PATH
     )
+    plugin_registry = PluginRegistry()
+    plugin_registry.load(Path(plugins_dir or DEFAULT_PLUGINS_DIR))
+    app.extensions["plugin_registry"] = plugin_registry
+
     app.extensions["tts_engine"] = tts_engine or build_tts_engine(config)
     app.register_blueprint(api_bp)
 
