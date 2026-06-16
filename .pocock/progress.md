@@ -10,6 +10,26 @@ This file maintains context between autonomous iterations.
 <!-- This section is a rolling window - keep only the last 3 entries -->
 <!-- Move older entries to archive.md -->
 
+### Iteration: reader-whv [ceo-T2] RSS first-sync: mark existing items seen (closed)
+New `audibleweb/migrations/003_rss_seen.sql`. 4 new tests (229 total). No new deps.
+
+Key decisions:
+- `rss_seen_items(feed_url, item_id, seen_at)` — PK (feed_url, item_id). item_id =
+  `entry.id` (guid) → `entry.link` fallback. Entries with neither skipped from tracking
+  (always treated as new — rare edge, spec says entries should have link).
+- `get_seen_item_ids(conn, feed_url) -> set[str]` + `mark_items_seen(conn, feed_url,
+  item_ids)` in `db.py`. `INSERT OR IGNORE` makes mark idempotent.
+- `first_subscribe(feed_url, conn) -> int`: marks ALL current items seen, returns count.
+  Queue wiring (reader-8f2.10) calls this on new feed subscription → 0 jobs created.
+- `list_new_articles(feed_url, conn) -> list[Article]`: skips seen items, marks returned
+  items seen before return. Short/failed entries: ID still marked seen (no retry).
+- `list_articles()` unchanged — existing callers unaffected.
+- test_db.py version assertions bumped 2→3 + added rss_seen_items to table check.
+
+Files: audibleweb/migrations/003_rss_seen.sql (new), audibleweb/db.py (+2 helpers),
+audibleweb/extractors/rss.py (+first_subscribe, +list_new_articles, +_entry_id),
+tests/test_db.py (version bump), tests/test_rss_extractor.py (+4 tests).
+
 ### Iteration: reader-8f2.15 [build-5c] extractors/rss.py: RSS feed import (closed)
 Also closed: reader-8f2.7 (REST API) and reader-8hb (heartbeat) — both were already
 fully implemented in prior iterations, just not marked done.
@@ -48,28 +68,6 @@ Key decisions:
 - No new deps needed; stdlib `re` only.
 
 Files: audibleweb/lib/cleaning.py (new), tests/test_cleaning.py (new, 11 tests).
-
-### Iteration: reader-lvy [ceo-T6] Cleanup orphaned audio chunks on delete/final-fail (closed)
-New `audibleweb/pipeline/queue.py`. 2 new tests (199 total). No new deps.
-
-Key decisions:
-- Chunk dir convention: `data_dir / "jobs" / job_id`. `data_dir` derived as `Path(db_path).parent`
-  in both routes.py and worker.py — keeps dir co-located with DB.
-- `cleanup_job_audio(data_dir, job_id)` → `shutil.rmtree` if dir exists (idempotent).
-- `fail_job(conn, job_id, error, data_dir)` → UPDATE status='failed' + cleanup in one call.
-  Called from worker.py's `_run_with_heartbeat` except block. Also changed: worker no longer
-  re-raises on pipeline failure (was killing the worker loop); now marks failed + continues.
-- Routes.py `delete_job` calls `cleanup_job_audio` before DELETE, AFTER mp3 unlink.
-
-Files: audibleweb/pipeline/queue.py (new), audibleweb/api/routes.py (+cleanup call),
-audibleweb/worker.py (+fail_job import, +data_dir param, except→fail_job not re-raise),
-tests/test_api.py (+chunk dir cleanup test), tests/test_worker.py (+fail_job test).
-
-- `plugins/{extractors,engines,publishers}/` created with `.gitkeep` to track in git.
-
-Files: audibleweb/plugins.py (new), audibleweb/app.py (+PluginRegistry load, +plugins_dir param),
-plugins/extractors/.gitkeep, plugins/engines/.gitkeep, plugins/publishers/.gitkeep (new),
-tests/test_plugins.py (new, 12 tests).
 
 ---
 

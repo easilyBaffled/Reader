@@ -4,6 +4,25 @@ Older iteration entries moved out of progress.md's rolling window.
 
 ---
 
+### Iteration: reader-lvy [ceo-T6] Cleanup orphaned audio chunks on delete/final-fail (closed)
+New `audibleweb/pipeline/queue.py`. 2 new tests (199 total). No new deps.
+
+Key decisions:
+- Chunk dir convention: `data_dir / "jobs" / job_id`. `data_dir` derived as `Path(db_path).parent`
+  in both routes.py and worker.py — keeps dir co-located with DB.
+- `cleanup_job_audio(data_dir, job_id)` → `shutil.rmtree` if dir exists (idempotent).
+- `fail_job(conn, job_id, error, data_dir)` → UPDATE status='failed' + cleanup in one call.
+  Called from worker.py's `_run_with_heartbeat` except block. Also changed: worker no longer
+  re-raises on pipeline failure (was killing the worker loop); now marks failed + continues.
+- Routes.py `delete_job` calls `cleanup_job_audio` before DELETE, AFTER mp3 unlink.
+
+Files: audibleweb/pipeline/queue.py (new), audibleweb/api/routes.py (+cleanup call),
+audibleweb/worker.py (+fail_job import, +data_dir param, except→fail_job not re-raise),
+tests/test_api.py (+chunk dir cleanup test), tests/test_worker.py (+fail_job test).
+Also: plugins/{extractors,engines,publishers}/.gitkeep + audibleweb/plugins.py (plugin discovery).
+
+---
+
 ### Iteration: reader-rnc [ceo-T3] Structured logging with job_id context and file rotation (closed)
 New `audibleweb/log.py` module. `LoggingConfig` added to `config.py` + `AppConfig`.
 4 new tests (185 total). No new deps (stdlib `logging` + `contextvars`).
