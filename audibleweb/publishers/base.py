@@ -29,6 +29,23 @@ class Publisher(Protocol):
 
     async def update_feed(self, episodes: list[Episode]) -> str: ...  # returns feed URL
 
+    async def publish_and_update_feed(
+        self,
+        episode: Episode,
+        audio_path: Path,
+        all_episodes: list[Episode],
+    ) -> tuple[str, str]:
+        """Stage MP3 + feed.xml atomically, returning (public_url, feed_url).
+
+        Default: calls publish() then update_feed() sequentially (fine for
+        LocalPublisher where file writes are already atomic enough).
+        GitHubPagesPublisher overrides this to do a single git commit+push so a
+        crash between operations can't leave the gh-pages branch in a broken state.
+        """
+        public_url = await self.publish(episode, audio_path)
+        feed_url = await self.update_feed(all_episodes)
+        return public_url, feed_url
+
 
 def episode_slug(title: str, published: datetime) -> str:
     """Sanitized title + date, e.g. '2026-06-13-article-title' (docs/design.md sec 6)."""

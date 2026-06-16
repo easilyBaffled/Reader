@@ -65,6 +65,27 @@ class GitHubPagesPublisher:
         await self._commit_and_push("Update feed.xml")
         return f"{self.pages_base_url}/feed.xml"
 
+    async def publish_and_update_feed(
+        self,
+        episode: Episode,
+        audio_path: Path,
+        all_episodes: list[Episode],
+    ) -> tuple[str, str]:
+        """Atomic: stage MP3 + feed.xml, single commit + single push (reader-ksd)."""
+        await self._ensure_clone()
+        slug = episode_slug(episode.title, episode.published)
+        audio_dir = self.work_dir / "audio"
+        audio_dir.mkdir(exist_ok=True)
+        shutil.copy2(audio_path, audio_dir / f"{slug}.mp3")
+        xml = generate_feed(all_episodes, self.feed_config)
+        validate_feed(xml)
+        (self.work_dir / "feed.xml").write_text(xml, encoding="utf-8")
+        await self._commit_and_push(f"Add episode: {episode.title}")
+        return (
+            f"{self.pages_base_url}/audio/{slug}.mp3",
+            f"{self.pages_base_url}/feed.xml",
+        )
+
     async def _ensure_clone(self) -> None:
         if (self.work_dir / ".git").is_dir():
             return

@@ -202,3 +202,65 @@ def test_clone_failure_raises_redacted_error(tmp_path):
 def test_pages_base_url_derived_from_repo(tmp_path, bare_repo):
     publisher = _publisher(tmp_path / "clone", bare_repo, repo="alice/her-feed")
     assert publisher.pages_base_url == "https://alice.github.io/her-feed"
+
+
+# --- atomic publish_and_update_feed -------------------------------------------
+
+
+def test_publish_and_update_feed_atomic_single_push(tmp_path, bare_repo):
+    audio_src = tmp_path / "src.mp3"
+    audio_src.write_bytes(b"fake mp3 data")
+    episode = _episode()
+    publisher = _publisher(tmp_path / "clone", bare_repo)
+
+    public_url, feed_url = run(
+        publisher.publish_and_update_feed(episode, audio_src, [episode])
+    )
+
+    assert (
+        public_url
+        == "https://testuser.github.io/testrepo/audio/2026-06-13-article-title.mp3"
+    )
+    assert feed_url == "https://testuser.github.io/testrepo/feed.xml"
+    # Both files on remote from a single commit
+    assert _show(bare_repo, "audio/2026-06-13-article-title.mp3") == b"fake mp3 data"
+    validate_feed(_show(bare_repo, "feed.xml").decode())
+
+
+def test_publish_and_update_feed_crash_before_commit_leaves_remote_unchanged(
+    tmp_path, bare_repo, monkeypatch
+):
+    """If feed validation fails, no commit is pushed — gh-pages is untouched."""
+    import audibleweb.publishers.github_pages as gh_mod
+
+    monkeypatch.setattr(
+        gh_mod, "validate_feed", lambda _: (_ for _ in ()).throw(ValueError("bad feed"))
+    )
+
+    audio_src = tmp_path / "src.mp3"
+    audio_src.write_bytes(b"fake mp3 data")
+    episode = _episode()
+    publisher = _publisher(tmp_path / "clone", bare_repo)
+
+    with pytest.raises(ValueError, match="bad feed"):
+        run(publisher.publish_and_update_feed(episode, audio_src, [episode]))
+
+    # gh-pages remote must NOT have the MP3 (no partial push)
+    with pytest.raises(subprocess.CalledProcessError):
+        _show(bare_repo, "audio/2026-06-13-article-title.mp3")
+
+
+def test_local_publisher_publish_and_update_feed_default(tmp_path):
+    audio_src = tmp_path / "src.mp3"
+    audio_src.write_bytes(b"audio-bytes")
+    episode = _episode()
+    publisher = LocalPublisher(tmp_path / "data", "http://localhost:5000", FEED_CONFIG)
+
+    public_url, feed_url = run(
+        publisher.publish_and_update_feed(episode, audio_src, [episode])
+    )
+
+    assert public_url == "http://localhost:5000/audio/2026-06-13-article-title.mp3"
+    assert feed_url == "http://localhost:5000/feed.xml"
+    assert (tmp_path / "data" / "audio" / "2026-06-13-article-title.mp3").exists()
+    assert (tmp_path / "data" / "feed.xml").exists()

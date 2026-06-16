@@ -30,3 +30,13 @@ class LocalPublisher:
         validate_feed(xml)
         (self.data_dir / "feed.xml").write_text(xml, encoding="utf-8")
         return f"{self.base_url}/feed.xml"
+
+    async def publish_and_update_feed(
+        self,
+        episode: Episode,
+        audio_path: Path,
+        all_episodes: list[Episode],
+    ) -> tuple[str, str]:
+        public_url = await self.publish(episode, audio_path)
+        feed_url = await self.update_feed(all_episodes)
+        return public_url, feed_url
