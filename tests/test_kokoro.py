@@ -6,7 +6,12 @@ import httpx
 import pytest
 from pydub import AudioSegment
 
-from audibleweb.engines.kokoro import KokoroEngine, KokoroEngineError
+from audibleweb.engines.kokoro import (
+    InvalidWAVError,
+    KokoroEngine,
+    KokoroEngineError,
+    _validate_wav_header,
+)
 from audibleweb.lib.voice import InvalidVoiceSpecError
 
 BASE_URL = "http://mock-tts/v1"
@@ -169,6 +174,84 @@ def test_generate_with_retry_raises_after_exhausting_retries():
 
     # 1 initial attempt + 3 retries
     assert attempts == 4
+
+
+# --- WAV header validation (reader-yau) ------------------------------------------
+
+
+def test_validate_wav_header_accepts_valid_wav():
+    _validate_wav_header(SILENCE_WAV)  # must not raise
+
+
+def test_validate_wav_header_rejects_garbage():
+    with pytest.raises(InvalidWAVError):
+        _validate_wav_header(b"\x00" * 100)
+
+
+def test_validate_wav_header_rejects_truncated():
+    with pytest.raises(InvalidWAVError):
+        _validate_wav_header(b"RIFF")  # only 4 bytes — missing WAVE at offset 8
+
+
+def test_garbage_bytes_in_response_retries_then_raises():
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(200, content=b"\x00" * 100)
+
+    client = httpx.AsyncClient(
+        base_url=BASE_URL, transport=httpx.MockTransport(handler)
+    )
+    engine = _engine(client)
+
+    with pytest.raises(KokoroEngineError):
+        run(engine.synthesize("Hello world", "af_heart"))
+
+    assert attempts == 4  # 1 initial + 3 retries
+
+
+def test_truncated_wav_bytes_retries_then_raises():
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(200, content=b"RIFF")  # only 4 bytes, missing WAVE
+
+    client = httpx.AsyncClient(
+        base_url=BASE_URL, transport=httpx.MockTransport(handler)
+    )
+    engine = _engine(client)
+
+    with pytest.raises(KokoroEngineError):
+        run(engine.synthesize("Hello world", "af_heart"))
+
+    assert attempts == 4
+
+
+def test_invalid_wav_header_eventually_succeeds_on_retry():
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        if not request.url.path.endswith("/audio/speech"):
+            return httpx.Response(404)
+        attempts += 1
+        if attempts < 3:
+            return httpx.Response(200, content=b"notawave" * 10)
+        return httpx.Response(200, content=SILENCE_WAV)
+
+    client = httpx.AsyncClient(
+        base_url=BASE_URL, transport=httpx.MockTransport(handler)
+    )
+    engine = _engine(client)
+
+    result = run(engine.synthesize("Hello world", "af_heart"))
+
+    assert attempts == 3
+    assert result == SILENCE_WAV
 
 
 # --- semaphore bounding (config tts.max_parallel) --------------------------------

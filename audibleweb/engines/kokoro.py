@@ -27,9 +27,23 @@ BASE_DELAY_SEC = 0.1
 MAX_DELAY_SEC = 10.0
 REQUEST_TIMEOUT_SEC = 120.0
 
+_RIFF = b"RIFF"
+_WAVE = b"WAVE"
+
 
 class KokoroEngineError(Exception):
     """Raised when the TTS API request fails after all retries (docs/design.md sec 9)."""
+
+
+class InvalidWAVError(Exception):
+    """Raised when TTS response has an invalid RIFF/WAVE header."""
+
+
+def _validate_wav_header(data: bytes) -> None:
+    if len(data) < 12 or data[:4] != _RIFF or data[8:12] != _WAVE:
+        raise InvalidWAVError(
+            f"Invalid WAV header: expected RIFF....WAVE, got {data[:12]!r}"
+        )
 
 
 class KokoroEngine:
@@ -92,7 +106,9 @@ class KokoroEngine:
                         },
                     )
                     response.raise_for_status()
-                    return response.content
+                    data = response.content
+                    _validate_wav_header(data)
+                    return data
             except Exception as exc:
                 last_error = exc
                 if attempt < MAX_RETRIES:

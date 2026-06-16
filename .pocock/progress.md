@@ -10,6 +10,26 @@ This file maintains context between autonomous iterations.
 <!-- This section is a rolling window - keep only the last 3 entries -->
 <!-- Move older entries to archive.md -->
 
+### Iteration: reader-yau [ceo-T1] WAV header validation in engines/kokoro.py (closed)
+Added `InvalidWAVError` + `_validate_wav_header(data: bytes) -> None` to
+`audibleweb/engines/kokoro.py`. Added 6 new tests (143 total). No new deps.
+
+Key decisions:
+- `_validate_wav_header` is a module-level function (not a method) so tests can
+  import and call it directly — same pattern as `_run_trafilatura` in web.py.
+- Validation: `len(data) < 12 or data[:4] != b"RIFF" or data[8:12] != b"WAVE"`.
+  Minimum valid WAV header is 12 bytes (RIFF + 4-byte size + WAVE).
+- Called inside the `try` block of `_generate_with_retry` after `response.content`,
+  so `InvalidWAVError` propagates to `except Exception as exc` → retries (3x)
+  → `KokoroEngineError` on exhaustion. No special-casing needed; existing retry
+  loop handles it identically to HTTP errors.
+- `InvalidWAVError` exported from kokoro.py (not engines/base.py) — it's engine-
+  specific. Queue layer (reader-8f2.10) catches `KokoroEngineError` and annotates
+  with chunk index per design.md sec 4; no change needed there.
+
+Files: audibleweb/engines/kokoro.py (modified), tests/test_kokoro.py (modified,
++6 tests: 3 direct `_validate_wav_header` unit tests + 3 end-to-end retry tests).
+
 ### Iteration: reader-8f2.14 [build-5b] extractors/web.py: trafilatura + Jina fallback (closed)
 Built `audibleweb/extractors/web.py` + `tests/test_web_extractor.py` (14 tests,
 137 total now). Added `trafilatura==2.1.0` dep (`uv add trafilatura`). httpx
