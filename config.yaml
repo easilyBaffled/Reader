@@ -34,3 +34,9 @@ server:
   host: "0.0.0.0"
   port: 5000
   api_key: ""
+
+logging:
+  log_path: "logs/audibleweb.log"
+  log_level: "INFO"
+  max_bytes: 10000000  # 10 MB per rotated file
+  backup_count: 5

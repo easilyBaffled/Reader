@@ -13,6 +13,7 @@ from audibleweb.config import DEFAULT_CONFIG_PATH, AppConfig, load_config
 from audibleweb.db import get_connection, migrate
 from audibleweb.engines.base import TTSEngine
 from audibleweb.engines.kokoro import KokoroEngine
+from audibleweb.log import setup_logging
 from audibleweb.worker import Worker
 
 DEFAULT_DB_PATH = Path("data/audibleweb.db")
@@ -81,7 +82,9 @@ def check_ffmpeg() -> None:
 
 def main() -> None:
     check_ffmpeg()
-    app = create_app()
+    config = load_config()
+    setup_logging(config.logging)
+    app = create_app(config=config)
     app.run(debug=True)
 
 

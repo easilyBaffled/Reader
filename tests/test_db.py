@@ -6,7 +6,7 @@ def test_migrate_creates_schema(tmp_path):
 
     version = migrate(conn)
 
-    assert version == 1
+    assert version == 2
     tables = {
         row["name"]
         for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -20,7 +20,7 @@ def test_migrate_is_idempotent(tmp_path):
     migrate(conn)
     version = migrate(conn)
 
-    assert version == 1
+    assert version == 2
     # second run must not error re-creating tables
     conn.execute("SELECT * FROM jobs")
     conn.execute("SELECT * FROM chunks")

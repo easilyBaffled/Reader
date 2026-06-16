@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import httpx
 import pytest
 import yaml
@@ -177,6 +179,26 @@ def test_get_job_not_found(client):
     resp = client.get("/api/jobs/missing")
 
     assert resp.status_code == 404
+
+
+def test_stale_heartbeat_surfaced_as_stalled(app, client):
+    stale = (datetime.now(UTC) - timedelta(seconds=61)).isoformat()
+    _insert_job(app, "job-stale", status="generating", heartbeat_at=stale)
+
+    resp = client.get("/api/jobs/job-stale")
+
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "stalled"
+
+
+def test_fresh_heartbeat_not_stalled(app, client):
+    fresh = datetime.now(UTC).isoformat()
+    _insert_job(app, "job-fresh", status="generating", heartbeat_at=fresh)
+
+    resp = client.get("/api/jobs/job-fresh")
+
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "generating"
 
 
 # --- DELETE /api/jobs/:id ---------------------------------------------------------
@@ -395,6 +417,7 @@ def test_get_settings_returns_all_sections(settings_app):
         "extraction",
         "normalization",
         "server",
+        "logging",
     }
 
 

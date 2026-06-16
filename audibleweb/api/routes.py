@@ -23,7 +23,7 @@ import dataclasses
 import json
 import sqlite3
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -33,6 +33,7 @@ from flask import Blueprint, current_app, jsonify, request
 from audibleweb.config import (
     ExtractionConfig,
     FeedConfig,
+    LoggingConfig,
     NormalizationConfig,
     PublisherConfig,
     ServerConfig,
@@ -54,6 +55,7 @@ ALL_STATUSES = (*PAUSABLE_STATUSES, *TERMINAL_STATUSES, "paused")
 
 MIN_SPEED = 0.5
 MAX_SPEED = 2.0
+STALL_THRESHOLD_SEC = 60
 
 
 def _db() -> sqlite3.Connection:
@@ -68,6 +70,15 @@ def _job_to_dict(row: sqlite3.Row) -> dict:
     job = dict(row)
     voice_config = job.get("voice_config")
     job["voice_config"] = json.loads(voice_config) if voice_config else None
+
+    if job["status"] in PIPELINE_STATUSES and job.get("heartbeat_at"):
+        try:
+            last_beat = datetime.fromisoformat(job["heartbeat_at"])
+            if datetime.now(UTC) - last_beat > timedelta(seconds=STALL_THRESHOLD_SEC):
+                job["status"] = "stalled"
+        except ValueError:
+            pass
+
     return job
 
 
@@ -330,6 +341,7 @@ _SECTION_CLASSES = {
     "extraction": ExtractionConfig,
     "normalization": NormalizationConfig,
     "server": ServerConfig,
+    "logging": LoggingConfig,
 }
 
 # Secret fields that live in .env only; never returned or written by this endpoint.

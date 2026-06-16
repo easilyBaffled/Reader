@@ -7,14 +7,21 @@ within a job, at the chunk level).
 """
 
 import asyncio
+import contextlib
+import logging
 import sqlite3
 import threading
+from datetime import UTC, datetime
 from pathlib import Path
 
 from audibleweb.core.pipeline import run_pipeline
 from audibleweb.db import get_connection
+from audibleweb.log import set_job_id
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_POLL_INTERVAL_SEC = 1.0
+HEARTBEAT_INTERVAL_SEC = 30.0
 
 
 class Worker:
@@ -58,7 +65,7 @@ class Worker:
             while not self._stop_event.is_set():
                 job_id = _claim_next_job(conn)
                 if job_id is not None:
-                    await run_pipeline(conn, job_id)
+                    await _run_with_heartbeat(conn, job_id)
                     continue
                 try:
                     await asyncio.wait_for(
@@ -68,6 +75,48 @@ class Worker:
                     pass
         finally:
             conn.close()
+
+
+async def _run_with_heartbeat(
+    conn: sqlite3.Connection,
+    job_id: str,
+    heartbeat_interval: float = HEARTBEAT_INTERVAL_SEC,
+) -> None:
+    set_job_id(job_id)
+    try:
+        logger.info("job started")
+        _set_heartbeat(conn, job_id)
+        heartbeat_task = asyncio.create_task(
+            _heartbeat_loop(conn, job_id, heartbeat_interval)
+        )
+        try:
+            await run_pipeline(conn, job_id)
+            logger.info("job done")
+        finally:
+            heartbeat_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await heartbeat_task
+    except Exception:
+        logger.exception("job failed")
+        raise
+    finally:
+        set_job_id(None)
+
+
+async def _heartbeat_loop(
+    conn: sqlite3.Connection, job_id: str, interval: float
+) -> None:
+    while True:
+        await asyncio.sleep(interval)
+        _set_heartbeat(conn, job_id)
+
+
+def _set_heartbeat(conn: sqlite3.Connection, job_id: str) -> None:
+    conn.execute(
+        "UPDATE jobs SET heartbeat_at = ? WHERE id = ?",
+        (datetime.now(UTC).isoformat(), job_id),
+    )
+    conn.commit()
 
 
 def _claim_next_job(conn: sqlite3.Connection) -> str | None:

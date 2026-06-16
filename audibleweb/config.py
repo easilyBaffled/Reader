@@ -76,6 +76,14 @@ class ServerConfig:
 
 
 @dataclass
+class LoggingConfig:
+    log_path: str = ""  # empty = no file logging; set in config.yaml for prod
+    log_level: str = "INFO"
+    max_bytes: int = 10_000_000  # 10 MB per file
+    backup_count: int = 5
+
+
+@dataclass
 class AppConfig:
     feed: FeedConfig = field(default_factory=FeedConfig)
     voice: VoiceConfig = field(default_factory=VoiceConfig)
@@ -84,6 +92,7 @@ class AppConfig:
     extraction: ExtractionConfig = field(default_factory=ExtractionConfig)
     normalization: NormalizationConfig = field(default_factory=NormalizationConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
 
 
 # env var -> (AppConfig section attr, section field) for secrets left blank in
@@ -122,6 +131,7 @@ def load_config(
         extraction=ExtractionConfig(**(raw.get("extraction") or {})),
         normalization=NormalizationConfig(**(raw.get("normalization") or {})),
         server=ServerConfig(**(raw.get("server") or {})),
+        logging=LoggingConfig(**(raw.get("logging") or {})),
     )
 
     for env_var, (section, attr) in _ENV_OVERRIDES.items():
