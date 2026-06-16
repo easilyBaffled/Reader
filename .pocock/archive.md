@@ -4,6 +4,33 @@ Older iteration entries moved out of progress.md's rolling window.
 
 ---
 
+### Iteration: reader-rnc [ceo-T3] Structured logging with job_id context and file rotation (closed)
+New `audibleweb/log.py` module. `LoggingConfig` added to `config.py` + `AppConfig`.
+4 new tests (185 total). No new deps (stdlib `logging` + `contextvars`).
+
+Key decisions:
+- `ContextVar[str | None]` for job_id context — works cleanly with asyncio; each
+  job sets it before `run_pipeline`, clears it in `finally`. `_JobIdFilter` reads
+  the var and injects `record.job_id` on every log record.
+- KV format: `time=<ISO> level=<LEVEL> logger=<NAME> msg=<msg> [job_id=<id>]`.
+  job_id omitted when empty (idle worker, non-pipeline code).
+- `setup_logging()` called from `main()` NOT `create_app()` — keeps tests clean
+  (no file handler created during pytest). Tests set up their own handlers directly
+  against `_JobIdFilter` + `_KVFormatter`.
+- `LoggingConfig.log_path` defaults to `""` (no file logging). `config.yaml` sets
+  it to `"logs/audibleweb.log"` for prod. `setup_logging()` returns `None` if
+  `log_path` is empty.
+- `LoggingConfig` added to `_SECTION_CLASSES` in routes.py — exposed via
+  GET/PUT /api/settings. No secrets in logging section.
+
+Files: audibleweb/log.py (new), audibleweb/config.py (+LoggingConfig),
+audibleweb/app.py (+setup_logging call in main), audibleweb/worker.py
+(+set_job_id around run_pipeline + logger calls), audibleweb/api/routes.py
+(+LoggingConfig to _SECTION_CLASSES), config.yaml (+logging section),
+tests/test_logging.py (new, 4 tests), tests/test_api.py (+logging to expected sections).
+
+---
+
 ### Iteration: reader-n19 [eng-T4] Cooperative pause check + weighted-blend fallback (closed)
 Added `check_cancel` callback to `KokoroEngine.synthesize()` + weighted-blend
 partial-failure fallback. 4 new tests (179 total). No new deps.

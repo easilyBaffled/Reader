@@ -10,6 +10,20 @@ This file maintains context between autonomous iterations.
 <!-- This section is a rolling window - keep only the last 3 entries -->
 <!-- Move older entries to archive.md -->
 
+### Iteration: reader-8f2.1 [build-3] Vendor lib/cleaning.py Stage 1+3 text cleaning (closed)
+New `audibleweb/lib/cleaning.py`. 11 new tests (210 total). No new deps.
+
+Key decisions:
+- `clean_text(text)` = Stage 1: fix non-standard punctuation (curly quotes, ellipsis) + ALL CAPS → lowercase.
+  No numeral conversion — no `num2words` dep, Kokoro handles digits fine, LLM normalization step also helps.
+- `apply_pronunciation_overrides(text, pronunciation)` = Stage 3: whole-word case-insensitive
+  substitution from pronunciation.json flat dict `{word: replacement}`. Called separately in pipeline
+  after LLM normalization.
+- `split_text_preserving_markers` dropped entirely (D10 — single-voice, no chapter/voice markers).
+- No new deps needed; stdlib `re` only.
+
+Files: audibleweb/lib/cleaning.py (new), tests/test_cleaning.py (new, 11 tests).
+
 ### Iteration: reader-lvy [ceo-T6] Cleanup orphaned audio chunks on delete/final-fail (closed)
 New `audibleweb/pipeline/queue.py`. 2 new tests (199 total). No new deps.
 
@@ -48,31 +62,6 @@ Key decisions:
 Files: audibleweb/plugins.py (new), audibleweb/app.py (+PluginRegistry load, +plugins_dir param),
 plugins/extractors/.gitkeep, plugins/engines/.gitkeep, plugins/publishers/.gitkeep (new),
 tests/test_plugins.py (new, 12 tests).
-
-### Iteration: reader-rnc [ceo-T3] Structured logging with job_id context and file rotation (closed)
-New `audibleweb/log.py` module. `LoggingConfig` added to `config.py` + `AppConfig`.
-4 new tests (185 total). No new deps (stdlib `logging` + `contextvars`).
-
-Key decisions:
-- `ContextVar[str | None]` for job_id context — works cleanly with asyncio; each
-  job sets it before `run_pipeline`, clears it in `finally`. `_JobIdFilter` reads
-  the var and injects `record.job_id` on every log record.
-- KV format: `time=<ISO> level=<LEVEL> logger=<NAME> msg=<msg> [job_id=<id>]`.
-  job_id omitted when empty (idle worker, non-pipeline code).
-- `setup_logging()` called from `main()` NOT `create_app()` — keeps tests clean
-  (no file handler created during pytest). Tests set up their own handlers directly
-  against `_JobIdFilter` + `_KVFormatter`.
-- `LoggingConfig.log_path` defaults to `""` (no file logging). `config.yaml` sets
-  it to `"logs/audibleweb.log"` for prod. `setup_logging()` returns `None` if
-  `log_path` is empty.
-- `LoggingConfig` added to `_SECTION_CLASSES` in routes.py — exposed via
-  GET/PUT /api/settings. No secrets in logging section.
-
-Files: audibleweb/log.py (new), audibleweb/config.py (+LoggingConfig),
-audibleweb/app.py (+setup_logging call in main), audibleweb/worker.py
-(+set_job_id around run_pipeline + logger calls), audibleweb/api/routes.py
-(+LoggingConfig to _SECTION_CLASSES), config.yaml (+logging section),
-tests/test_logging.py (new, 4 tests), tests/test_api.py (+logging to expected sections).
 
 ---
 
