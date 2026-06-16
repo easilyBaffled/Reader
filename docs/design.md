@@ -60,6 +60,31 @@ AudibleWeb is a local web application that turns URLs, files, and text into podc
 - SQLite job queue — no Redis/Celery, survives restarts, queryable history
 - Job lifecycle: `queued -> extracting -> normalizing -> generating -> publishing -> done | failed`
 
+### 1.1 Concurrency Model (D13)
+
+Flask stays **fully synchronous**. Routes only read and write the `jobs`/`chunks` SQLite tables — they never `await` anything.
+
+All async I/O (TTS calls, HTTP fetches, git push) runs in a **background worker thread** (`audibleweb/worker.py`) that owns its own `asyncio` event loop. The worker polls `jobs` for `status='queued'` entries at a 1-second interval, picks one up, and drives it through the pipeline. Chunk-level parallelism (concurrent TTS API calls) happens inside that event loop via a semaphore-bounded `asyncio.gather`.
+
+```
+Flask request thread          Worker thread (daemon)
+──────────────────            ────────────────────────────────────────
+POST /api/jobs                asyncio.run(Worker._main())
+  INSERT jobs (queued)          loop: poll jobs WHERE status='queued'
+  return 201                      UPDATE jobs SET status='extracting'
+                                  await run_pipeline(job_id)
+GET /api/jobs/:id               UPDATE jobs SET status='done'
+  SELECT jobs                   sleep(poll_interval)
+  return status
+```
+
+**Why this shape:**
+- Flask's WSGI server handles concurrent HTTP requests in threads without needing an async framework.
+- Pipeline stages (TTS, normalization, publishing) are inherently I/O-bound and benefit from `asyncio` concurrency within a job, but there's no benefit to async between jobs (one job at a time is intentional).
+- Thread boundary is crossed only via SQLite reads/writes — no shared in-process state, no queues, no locks beyond SQLite's own serialization.
+
+See `audibleweb/worker.py` for the implementation (`Worker.start()`, `Worker._main()`, `_run_with_heartbeat()`).
+
 ---
 
 ## 2. Plugin System
