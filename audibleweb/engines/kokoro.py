@@ -17,10 +17,11 @@ from __future__ import annotations
 
 import asyncio
 import random
+from collections.abc import Awaitable, Callable
 
 import httpx
 
-from audibleweb.lib.voice import mix_weighted_blend, parse_voice_spec
+from audibleweb.lib.voice import VoiceSpec, mix_weighted_blend, parse_voice_spec
 
 MAX_RETRIES = 3
 BASE_DELAY_SEC = 0.1
@@ -66,18 +67,52 @@ class KokoroEngine:
             timeout=REQUEST_TIMEOUT_SEC,
         )
 
-    async def synthesize(self, text: str, voice: str, speed: float = 1.0) -> bytes:
+    async def synthesize(
+        self,
+        text: str,
+        voice: str,
+        speed: float = 1.0,
+        *,
+        check_cancel: Callable[[], Awaitable[None]] | None = None,
+    ) -> bytes:
         spec = parse_voice_spec(voice)
 
         if spec.type == "native":
-            return await self._generate_with_retry(text, spec.native_string, speed)
+            result = await self._generate_with_retry(text, spec.native_string, speed)
+        else:
+            result = await self._synthesize_weighted(text, spec, speed)
 
+        if check_cancel is not None:
+            await check_cancel()
+
+        return result
+
+    async def _synthesize_weighted(
+        self, text: str, spec: VoiceSpec, speed: float
+    ) -> bytes:
+        """Synthesize a weighted blend; falls back to the surviving voice if one leg fails."""
         voice_a, voice_b = spec.voices
-        buffer_a, buffer_b = await asyncio.gather(
+        raw = await asyncio.gather(
             self._generate_with_retry(text, voice_a.name, speed),
             self._generate_with_retry(text, voice_b.name, speed),
+            return_exceptions=True,
         )
-        return mix_weighted_blend(buffer_a, voice_a.weight, buffer_b, voice_b.weight)
+        buf_a: bytes | BaseException = raw[0]
+        buf_b: bytes | BaseException = raw[1]
+
+        a_ok = not isinstance(buf_a, Exception)
+        b_ok = not isinstance(buf_b, Exception)
+
+        if a_ok and b_ok:
+            return mix_weighted_blend(buf_a, voice_a.weight, buf_b, voice_b.weight)  # type: ignore[arg-type]
+        if a_ok:
+            return buf_a  # type: ignore[return-value]
+        if b_ok:
+            return buf_b  # type: ignore[return-value]
+        cause = buf_a if isinstance(buf_a, Exception) else None
+        raise KokoroEngineError(
+            f"Both voices in weighted blend failed: {buf_a}; {buf_b}"
+        ) from cause
 
     async def list_voices(self) -> list[str]:
         response = await self._client.get("/audio/voices")

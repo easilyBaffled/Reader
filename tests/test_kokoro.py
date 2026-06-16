@@ -254,6 +254,65 @@ def test_invalid_wav_header_eventually_succeeds_on_retry():
     assert result == SILENCE_WAV
 
 
+# --- cooperative pause/cancel check (D6) -----------------------------------------
+
+
+def test_synthesize_check_cancel_called_after_chunk(mock_tts_client):
+    called = []
+
+    async def check():
+        called.append(True)
+
+    engine = _engine(mock_tts_client)
+    run(engine.synthesize("Hello", "af_heart", check_cancel=check))
+    assert called == [True]
+
+
+def test_synthesize_check_cancel_raises_propagates(mock_tts_client):
+    async def check():
+        raise asyncio.CancelledError("paused")
+
+    engine = _engine(mock_tts_client)
+    with pytest.raises(asyncio.CancelledError):
+        run(engine.synthesize("Hello", "af_heart", check_cancel=check))
+
+
+# --- weighted blend fallback (D9) ------------------------------------------------
+
+
+def test_weighted_blend_fallback_when_secondary_voice_fails():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/audio/speech"):
+            voice = json.loads(request.read())["voice"]
+            if voice == "af_bella":
+                return httpx.Response(500)
+            return httpx.Response(200, content=SILENCE_WAV)
+        return httpx.Response(404)
+
+    client = httpx.AsyncClient(
+        base_url=BASE_URL, transport=httpx.MockTransport(handler)
+    )
+    engine = _engine(client)
+
+    result = run(engine.synthesize("Hello", "af_heart:0.6+af_bella:0.4"))
+    assert result == SILENCE_WAV
+
+
+def test_weighted_blend_both_voices_fail_raises():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/audio/speech"):
+            return httpx.Response(500)
+        return httpx.Response(404)
+
+    client = httpx.AsyncClient(
+        base_url=BASE_URL, transport=httpx.MockTransport(handler)
+    )
+    engine = _engine(client)
+
+    with pytest.raises(KokoroEngineError):
+        run(engine.synthesize("Hello", "af_heart:0.6+af_bella:0.4"))
+
+
 # --- semaphore bounding (config tts.max_parallel) --------------------------------
 
 

@@ -16,6 +16,7 @@ reader-8f2.4:
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Protocol, runtime_checkable
 
 
@@ -24,9 +25,17 @@ class TTSEngine(Protocol):
     name: str
     supports_blending: bool
 
-    async def synthesize(self, text: str, voice: str, speed: float = 1.0) -> bytes:
+    async def synthesize(
+        self,
+        text: str,
+        voice: str,
+        speed: float = 1.0,
+        *,
+        check_cancel: Callable[[], Awaitable[None]] | None = None,
+    ) -> bytes:
         """Synthesize `text` as `voice` (a voice spec string, see lib/voice.py)
-        at `speed`. Returns WAV audio bytes."""
+        at `speed`. Returns WAV audio bytes. If `check_cancel` is provided it is
+        awaited after synthesis; callers use it for cooperative pause/cancel (D6)."""
         ...
 
     async def list_voices(self) -> list[str]:

@@ -4,6 +4,32 @@ Older iteration entries moved out of progress.md's rolling window.
 
 ---
 
+### Iteration: reader-ksd [ceo-T4] Atomic single-push publish workflow (closed)
+Added `publish_and_update_feed(episode, audio_path, all_episodes) -> tuple[str, str]`
+to Publisher Protocol in `base.py` + concrete implementations in both publishers.
+3 new tests (14 publisher tests total, 163 suite total). No new deps.
+
+Key decisions:
+- Protocol gets a default `publish_and_update_feed()` body that calls `publish()`
+  then `update_feed()` sequentially — Python Protocol allows method bodies, but
+  concrete classes don't inherit them unless they subclass the Protocol. So both
+  `LocalPublisher` and `GitHubPagesPublisher` implement the method explicitly.
+- `GitHubPagesPublisher.publish_and_update_feed()`: `_ensure_clone()` once, copy
+  MP3 to `work_dir/audio/`, generate+validate feed.xml, write to `work_dir/`,
+  then ONE `_commit_and_push()`. If `validate_feed()` raises, no commit/push →
+  gh-pages remote is untouched (crash-safe).
+- `LocalPublisher.publish_and_update_feed()`: calls `publish()` + `update_feed()`
+  sequentially — local file writes are already atomic enough (no git push).
+- `all_episodes` argument is the FULL list including the new episode (caller
+  builds it). The publisher does not mutate the episode list.
+- Queue wiring (reader-8f2.10) MUST call `publish_and_update_feed()` instead of
+  calling `publish()` then `update_feed()` separately — that's the broken pattern
+  this issue fixes.
+
+Files: audibleweb/publishers/base.py (modified), audibleweb/publishers/github_pages.py
+(modified), audibleweb/publishers/local.py (modified), tests/test_publishers.py
+(modified, +3 tests).
+
 ### Setup (manual, pre-loop)
 Scaffolded app shell + SQLite schema (closed reader-392/eng-T2, reader-tio/eng-T6
 manually, not via loop):

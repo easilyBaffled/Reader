@@ -10,6 +10,27 @@ This file maintains context between autonomous iterations.
 <!-- This section is a rolling window - keep only the last 3 entries -->
 <!-- Move older entries to archive.md -->
 
+### Iteration: reader-n19 [eng-T4] Cooperative pause check + weighted-blend fallback (closed)
+Added `check_cancel` callback to `KokoroEngine.synthesize()` + weighted-blend
+partial-failure fallback. 4 new tests (179 total). No new deps.
+
+Key decisions:
+- `check_cancel: Callable[[], Awaitable[None]] | None = None` kwarg on `synthesize()`.
+  Called after synthesis completes (before return). Caller awaits it; if job is
+  paused/cancelled, caller raises (typically `asyncio.CancelledError`) — propagates
+  naturally. "Skip already-done chunks on resume" is queue.py behavior (reader-8f2.10),
+  not engine behavior — engine just provides the hook.
+- Weighted blend refactored into `_synthesize_weighted()`. Uses
+  `asyncio.gather(return_exceptions=True)` — if one voice fails, returns the
+  surviving voice's audio alone; if both fail, raises `KokoroEngineError`.
+  Primary fallback = voice_a (first in spec). voice_b fail → returns buf_a directly
+  (no extra TTS call). voice_a fail → returns buf_b. Both fail → raises.
+- Protocol in `base.py` updated to match new `synthesize()` signature.
+
+Files: audibleweb/engines/kokoro.py (modified, +_synthesize_weighted),
+audibleweb/engines/base.py (modified, +check_cancel to Protocol),
+tests/test_kokoro.py (+4 tests).
+
 ### Iteration: reader-fco [eng-T5] Episode rotation + pre-push MP3 size check (closed)
 Added `_apply_rotation()` + `_check_audio_size()` to `GitHubPagesPublisher`.
 2 new tests (175 total). No new deps.
@@ -57,32 +78,6 @@ Key decisions:
 Files: audibleweb/api/__init__.py (staged, pre-existing untracked),
 audibleweb/api/routes.py (new/staged), audibleweb/app.py (modified,
 +config_path param + CONFIG_PATH in app.config), tests/test_api.py (new/staged).
-
-### Iteration: reader-ksd [ceo-T4] Atomic single-push publish workflow (closed)
-Added `publish_and_update_feed(episode, audio_path, all_episodes) -> tuple[str, str]`
-to Publisher Protocol in `base.py` + concrete implementations in both publishers.
-3 new tests (14 publisher tests total, 163 suite total). No new deps.
-
-Key decisions:
-- Protocol gets a default `publish_and_update_feed()` body that calls `publish()`
-  then `update_feed()` sequentially — Python Protocol allows method bodies, but
-  concrete classes don't inherit them unless they subclass the Protocol. So both
-  `LocalPublisher` and `GitHubPagesPublisher` implement the method explicitly.
-- `GitHubPagesPublisher.publish_and_update_feed()`: `_ensure_clone()` once, copy
-  MP3 to `work_dir/audio/`, generate+validate feed.xml, write to `work_dir/`,
-  then ONE `_commit_and_push()`. If `validate_feed()` raises, no commit/push →
-  gh-pages remote is untouched (crash-safe).
-- `LocalPublisher.publish_and_update_feed()`: calls `publish()` + `update_feed()`
-  sequentially — local file writes are already atomic enough (no git push).
-- `all_episodes` argument is the FULL list including the new episode (caller
-  builds it). The publisher does not mutate the episode list.
-- Queue wiring (reader-8f2.10) MUST call `publish_and_update_feed()` instead of
-  calling `publish()` then `update_feed()` separately — that's the broken pattern
-  this issue fixes.
-
-Files: audibleweb/publishers/base.py (modified), audibleweb/publishers/github_pages.py
-(modified), audibleweb/publishers/local.py (modified), tests/test_publishers.py
-(modified, +3 tests).
 
 ---
 
