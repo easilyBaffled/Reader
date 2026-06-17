@@ -264,5 +264,5 @@ def delete_pronunciation(word: str):
     _save_pronunciations(pronunciations)
     return render_template(
         "partials/pronunciation_list.html",
-        pronunciations=pronunciations,
+        pronunciations=_load_pronunciations(),
     )

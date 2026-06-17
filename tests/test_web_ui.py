@@ -187,6 +187,19 @@ class TestSettingsTab:
         html = resp.data.decode()
         assert "feed-title" in html or "Feed" in html
 
+    def test_pronunciations_div_has_own_hx_target(self, client):
+        """Regression guard: hx-target is inheritable in HTMX, and the
+        surrounding <form> declares hx-target="this". Without its own
+        explicit hx-target, #pronunciations-list's "this" would resolve to
+        the ancestor form instead of itself, corrupting the whole form on
+        every Settings page load. This only checks the static markup (the
+        runtime HTMX inheritance behavior needs a real browser), but it
+        still catches someone removing the attribute as "redundant"."""
+        resp = client.get("/tab/settings")
+        html = resp.data.decode()
+        pronunciations_div = html.split('id="pronunciations-list"')[1].split(">")[0]
+        assert 'hx-target="this"' in pronunciations_div
+
     def test_settings_single_voice_default_shows_single_mode(self, tmp_path):
         from audibleweb.app import create_app
         from audibleweb.config import AppConfig, VoiceConfig
