@@ -83,14 +83,21 @@
   }
 
   function linkWeightSliders(builder) {
-    var sliders = all('.voice-blend-weight', builder);
-    if (sliders.length !== 2) return;
-    sliders[0].addEventListener('input', function () {
-      sliders[1].value = (1 - parseFloat(sliders[0].value)).toFixed(2);
+    // The macro always renders 3 .voice-blend-weight sliders (hidden via CSS
+    // outside weighted mode, never removed from the DOM) -- so querying for
+    // "exactly 2 sliders" never matches. Weighted mode only ever uses the
+    // first 2 slots, so grab those specifically instead of counting all of
+    // them.
+    var slots = all('.voice-blend-slot', builder);
+    var sliderA = slots[0] && slots[0].querySelector('.voice-blend-weight');
+    var sliderB = slots[1] && slots[1].querySelector('.voice-blend-weight');
+    if (!sliderA || !sliderB) return;
+    sliderA.addEventListener('input', function () {
+      sliderB.value = (1 - parseFloat(sliderA.value)).toFixed(2);
       updateSpec(builder);
     });
-    sliders[1].addEventListener('input', function () {
-      sliders[0].value = (1 - parseFloat(sliders[1].value)).toFixed(2);
+    sliderB.addEventListener('input', function () {
+      sliderA.value = (1 - parseFloat(sliderB.value)).toFixed(2);
       updateSpec(builder);
     });
   }

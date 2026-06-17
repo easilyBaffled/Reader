@@ -1,0 +1,22 @@
+{% from 'macros.html' import icon %}
+
+{% if pronunciations %}
+<div class="pronunciation-rows">
+  {% for word, replacement in pronunciations.items() %}
+  <div class="pronunciation-row">
+    <span class="pronunciation-word">{{ word }}</span>
+    <span class="pronunciation-arrow">&rarr;</span>
+    <span class="pronunciation-replacement">{{ replacement }}</span>
+    <button class="btn-icon" type="button"
+            hx-delete="/web/pronunciations/{{ word }}"
+            hx-target="#pronunciations-list"
+            hx-swap="innerHTML"
+            aria-label="Delete pronunciation for {{ word }}">
+      {{ icon('delete') }}
+    </button>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="empty-state-inline">No pronunciation overrides yet.</p>
+{% endif %}

@@ -65,16 +65,22 @@
 
   <section class="settings-section">
     <h2>Pronunciation Overrides</h2>
+    {# hx-target="this" is required here, not redundant: hx-target is
+       inheritable in HTMX, and the parent <form> declares hx-target="this".
+       Without this div setting its own, "this" would inherit the form's
+       meaning and resolve to the form itself, swapping the form's innerHTML
+       with this fragment's response instead of this div's. #}
     <div id="pronunciations-list"
-         hx-get="/api/pronunciations"
+         hx-get="/web/pronunciations"
          hx-trigger="load"
+         hx-target="this"
          hx-swap="innerHTML">
       <div class="skeleton skeleton-row"></div>
     </div>
 
     <div class="quick-add" style="margin-top: var(--space-base)">
       <form class="quick-add-form"
-            hx-put="/api/pronunciations"
+            hx-put="/web/pronunciations"
             hx-target="#pronunciations-list"
             hx-swap="innerHTML">
         <input class="quick-add-input" type="text" name="word"

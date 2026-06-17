@@ -11,7 +11,12 @@ from datetime import UTC, datetime
 
 from flask import Blueprint, current_app, render_template, request
 
-from audibleweb.api.routes import _job_to_dict, _validate_voice_config
+from audibleweb.api.routes import (
+    _job_to_dict,
+    _load_pronunciations,
+    _save_pronunciations,
+    _validate_voice_config,
+)
 from audibleweb.config import SETTINGS_SECTION_CLASSES, apply_settings_patch
 from audibleweb.db import get_connection
 from audibleweb.lib.voice import InvalidVoiceSpecError, VoiceWeight, parse_voice_spec
@@ -227,4 +232,37 @@ def save_settings():
         saved=True,
         voice_mode=voice_mode,
         voice_voices=voice_voices,
+    )
+
+
+@web_bp.get("/web/pronunciations")
+def list_pronunciations():
+    return render_template(
+        "partials/pronunciation_list.html",
+        pronunciations=_load_pronunciations(),
+    )
+
+
+@web_bp.put("/web/pronunciations")
+def upsert_pronunciation():
+    word = (request.form.get("word") or "").strip()
+    replacement = (request.form.get("replacement") or "").strip()
+    if word and replacement:
+        pronunciations = _load_pronunciations()
+        pronunciations[word] = replacement
+        _save_pronunciations(pronunciations)
+    return render_template(
+        "partials/pronunciation_list.html",
+        pronunciations=_load_pronunciations(),
+    )
+
+
+@web_bp.delete("/web/pronunciations/<word>")
+def delete_pronunciation(word: str):
+    pronunciations = _load_pronunciations()
+    pronunciations.pop(word, None)
+    _save_pronunciations(pronunciations)
+    return render_template(
+        "partials/pronunciation_list.html",
+        pronunciations=pronunciations,
     )

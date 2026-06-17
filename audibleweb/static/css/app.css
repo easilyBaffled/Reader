@@ -576,3 +576,42 @@ body {
     padding: var(--space-base);
   }
 }
+
+/* ── Pronunciation overrides ─────────────────────────────────── */
+
+.pronunciation-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-sm);
+}
+
+.pronunciation-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-base);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.pronunciation-word {
+  font-weight: 500;
+}
+
+.pronunciation-arrow {
+  color: var(--text-muted);
+}
+
+.pronunciation-replacement {
+  flex: 1;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.empty-state-inline {
+  color: var(--text-muted);
+  font-size: 14px;
+  margin-bottom: var(--space-sm);
+}

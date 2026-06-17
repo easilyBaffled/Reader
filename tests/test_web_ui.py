@@ -329,6 +329,54 @@ class TestSettingsTab:
         assert not config_path.exists()
 
 
+class TestPronunciationsWebUI:
+    def test_get_pronunciations_empty_state(self, client):
+        resp = client.get("/web/pronunciations")
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "no pronunciation" in html.lower()
+
+    def test_get_pronunciations_lists_existing(self, app, client):
+        path = app.config["PRONUNCIATION_PATH"]
+        path.write_text('{"Kubernetes": "Koo-ber-net-eez"}')
+
+        resp = client.get("/web/pronunciations")
+
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "Kubernetes" in html
+        assert "Koo-ber-net-eez" in html
+
+    def test_put_pronunciation_adds_and_persists(self, app, client):
+        resp = client.put(
+            "/web/pronunciations",
+            data={"word": "Kubernetes", "replacement": "Koo-ber-net-eez"},
+        )
+
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "Kubernetes" in html
+        assert "Koo-ber-net-eez" in html
+        import json
+
+        saved = json.loads(app.config["PRONUNCIATION_PATH"].read_text())
+        assert saved == {"Kubernetes": "Koo-ber-net-eez"}
+
+    def test_delete_pronunciation_removes_and_rerenders(self, app, client):
+        path = app.config["PRONUNCIATION_PATH"]
+        path.write_text('{"Kubernetes": "Koo-ber-net-eez"}')
+
+        resp = client.delete("/web/pronunciations/Kubernetes")
+
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "Kubernetes" not in html
+        import json
+
+        saved = json.loads(path.read_text())
+        assert saved == {}
+
+
 class TestUnknownTab:
     def test_unknown_tab_returns_404(self, client):
         resp = client.get("/tab/nonexistent")
