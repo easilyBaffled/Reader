@@ -239,6 +239,32 @@ def test_publish_and_update_feed_atomic_single_push(tmp_path, bare_repo):
     validate_feed(_show(bare_repo, "feed.xml").decode())
 
 
+def test_publish_and_update_feed_sets_public_url_when_caller_omits_it(
+    tmp_path, bare_repo
+):
+    """Caller constructs Episode without pre-setting public_url (the documented
+    Publisher Protocol signature, base.py:12-19, allows public_url to default to
+    "") -- the publisher itself must compute it before generating feed.xml,
+    rather than relying on every caller to predict the URL externally."""
+    audio_src = tmp_path / "src.mp3"
+    audio_src.write_bytes(b"fake mp3 data")
+    episode = _episode(public_url="")  # default Episode() shape, public_url unset
+    publisher = _publisher(tmp_path / "clone", bare_repo)
+
+    public_url, feed_url = run(
+        publisher.publish_and_update_feed(episode, audio_src, [episode])
+    )
+
+    assert (
+        public_url
+        == "https://testuser.github.io/testrepo/audio/2026-06-13-article-title.mp3"
+    )
+    assert episode.public_url == public_url  # publisher set it on the episode
+    xml = _show(bare_repo, "feed.xml").decode()
+    validate_feed(xml)  # no raise -- enclosure url is non-empty
+    assert public_url in xml
+
+
 def test_publish_and_update_feed_crash_before_commit_leaves_remote_unchanged(
     tmp_path, bare_repo, monkeypatch
 ):
@@ -276,6 +302,29 @@ def test_local_publisher_publish_and_update_feed_default(tmp_path):
     assert feed_url == "http://localhost:5000/feed.xml"
     assert (tmp_path / "data" / "audio" / "2026-06-13-article-title.mp3").exists()
     assert (tmp_path / "data" / "feed.xml").exists()
+
+
+def test_local_publisher_publish_and_update_feed_sets_public_url_when_omitted(
+    tmp_path,
+):
+    """Same gap as the GitHubPagesPublisher case: LocalPublisher.publish() must
+    set episode.public_url itself so the subsequent update_feed() call (which
+    reads episode.public_url into feed.xml's <enclosure url>) doesn't validate
+    against an empty string when the caller didn't pre-populate it."""
+    audio_src = tmp_path / "src.mp3"
+    audio_src.write_bytes(b"audio-bytes")
+    episode = _episode(public_url="")
+    publisher = LocalPublisher(tmp_path / "data", "http://localhost:5000", FEED_CONFIG)
+
+    public_url, feed_url = run(
+        publisher.publish_and_update_feed(episode, audio_src, [episode])
+    )
+
+    assert public_url == "http://localhost:5000/audio/2026-06-13-article-title.mp3"
+    assert episode.public_url == public_url
+    feed_xml = (tmp_path / "data" / "feed.xml").read_text()
+    validate_feed(feed_xml)  # no raise
+    assert public_url in feed_xml
 
 
 # --- episode rotation + size check --------------------------------------------

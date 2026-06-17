@@ -83,6 +83,7 @@ class GitHubPagesPublisher:
         audio_dir = self.work_dir / "audio"
         audio_dir.mkdir(exist_ok=True)
         shutil.copy2(audio_path, audio_dir / f"{slug}.mp3")
+        episode.public_url = f"{self.pages_base_url}/audio/{slug}.mp3"
         kept_episodes = self._apply_rotation(all_episodes)
         self._check_audio_size()
         xml = generate_feed(kept_episodes, self.feed_config)

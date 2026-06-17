@@ -23,7 +23,8 @@ class LocalPublisher:
         slug = episode_slug(episode.title, episode.published)
         dest = self.audio_dir / f"{slug}.mp3"
         shutil.copy2(audio_path, dest)
-        return f"{self.base_url}/audio/{slug}.mp3"
+        episode.public_url = f"{self.base_url}/audio/{slug}.mp3"
+        return episode.public_url
 
     async def update_feed(self, episodes: list[Episode]) -> str:
         xml = generate_feed(episodes, self.feed_config)
