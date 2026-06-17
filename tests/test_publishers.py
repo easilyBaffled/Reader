@@ -204,6 +204,18 @@ def test_pages_base_url_derived_from_repo(tmp_path, bare_repo):
     assert publisher.pages_base_url == "https://alice.github.io/her-feed"
 
 
+def test_remote_url_embeds_token_when_not_overridden(tmp_path):
+    """Production code never passes remote_url -- this is the real path it takes."""
+    publisher = GitHubPagesPublisher(
+        repo="testuser/testrepo",
+        token="my-test-token",
+        work_dir=tmp_path / "clone",
+        feed_config=FEED_CONFIG,
+    )
+
+    assert publisher._remote_url == "https://my-test-token@github.com/testuser/testrepo.git"
+
+
 # --- atomic publish_and_update_feed -------------------------------------------
 
 
