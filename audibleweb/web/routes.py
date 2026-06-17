@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+import re
 import sqlite3
 import uuid
 from datetime import UTC, datetime
@@ -9,6 +11,7 @@ from datetime import UTC, datetime
 from flask import Blueprint, current_app, render_template, request
 
 from audibleweb.api.routes import _job_to_dict
+from audibleweb.config import SETTINGS_SECTION_CLASSES, apply_settings_patch
 from audibleweb.db import get_connection
 
 web_bp = Blueprint(
@@ -20,6 +23,8 @@ web_bp = Blueprint(
 _TABS = frozenset({"inbox", "queue", "feed", "settings"})
 
 _INPUT_TYPES = frozenset({"url", "raw_text", "file", "rss"})
+
+_SETTINGS_FORM_KEY_RE = re.compile(r"^(\w+)\[(\w+)\]$")
 
 
 def _db() -> sqlite3.Connection:
@@ -62,7 +67,9 @@ def tab(tab_name: str):
     elif tab_name == "feed":
         ctx["episodes"] = _load_done_jobs()
         config = current_app.config.get("APP_CONFIG")
-        if config and config.publisher and getattr(config.publisher, "repo", None):
+        if config and config.publisher and config.publisher.type == "local":
+            ctx["feed_url"] = f"http://{config.server.host}:{config.server.port}/feed.xml"
+        elif config and config.publisher and getattr(config.publisher, "repo", None):
             ctx["feed_url"] = (
                 f"https://{config.publisher.repo.split('/')[0]}.github.io"
                 f"/{config.publisher.repo.split('/')[-1]}/feed.xml"
@@ -113,4 +120,59 @@ def create_job():
         "partials/queue.html",
         active_tab="queue",
         jobs=_load_jobs(),
+    )
+
+
+def _coerce_settings_field(value: str, field_type: object) -> object:
+    type_name = field_type if isinstance(field_type, str) else getattr(
+        field_type, "__name__", ""
+    )
+    if type_name == "int":
+        return int(value)
+    if type_name == "float":
+        return float(value)
+    if type_name == "bool":
+        return value.lower() in ("true", "1", "yes", "on")
+    return value
+
+
+def _parse_settings_form(form) -> dict[str, dict]:
+    """Convert HTML form fields like 'feed[title]' into a nested settings patch,
+    coercing each value to its dataclass field's declared type."""
+    field_types = {
+        section: {f.name: f.type for f in dataclasses.fields(cls)}
+        for section, cls in SETTINGS_SECTION_CLASSES.items()
+    }
+    patch: dict[str, dict] = {}
+    for key, value in form.items():
+        match = _SETTINGS_FORM_KEY_RE.match(key)
+        if not match:
+            continue
+        section, field_name = match.groups()
+        field_type = field_types.get(section, {}).get(field_name, str)
+        patch.setdefault(section, {})[field_name] = _coerce_settings_field(
+            value, field_type
+        )
+    return patch
+
+
+@web_bp.put("/web/settings")
+def save_settings():
+    patch = _parse_settings_form(request.form)
+    try:
+        new_config = apply_settings_patch(current_app.config["CONFIG_PATH"], patch)
+    except ValueError as exc:
+        return render_template(
+            "partials/settings.html",
+            active_tab="settings",
+            config=current_app.config.get("APP_CONFIG"),
+            save_error=str(exc),
+        )
+
+    current_app.config["APP_CONFIG"] = new_config
+    return render_template(
+        "partials/settings.html",
+        active_tab="settings",
+        config=new_config,
+        saved=True,
     )

@@ -6,7 +6,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from flask import Flask
+from flask import Flask, abort, send_from_directory
 
 from audibleweb.api.routes import api_bp
 from audibleweb.api.sse import sse_bp
@@ -45,7 +45,7 @@ def create_app(
 ) -> Flask:
     app = Flask(__name__)
 
-    db_path = Path(db_path or os.environ.get("AUDIBLEWEB_DB_PATH", DEFAULT_DB_PATH))
+    db_path = Path(db_path or os.environ.get("AUDIBLEWEB_DB_PATH", DEFAULT_DB_PATH)).resolve()
     conn = get_connection(db_path)
     migrate(conn)
     conn.close()
@@ -70,6 +70,20 @@ def create_app(
     @app.get("/healthz")
     def healthz():
         return {"status": "ok"}
+
+    @app.get("/audio/<path:filename>")
+    def audio(filename: str):
+        audio_dir = db_path.parent / "audio"
+        if not (audio_dir / filename).is_file():
+            abort(404)
+        return send_from_directory(audio_dir, filename)
+
+    @app.get("/feed.xml")
+    def feed_xml():
+        feed_path = db_path.parent / "feed.xml"
+        if not feed_path.is_file():
+            abort(404)
+        return send_from_directory(db_path.parent, "feed.xml")
 
     if start_worker:
         import json as _json

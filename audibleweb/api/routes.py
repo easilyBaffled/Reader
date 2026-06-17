@@ -27,21 +27,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
-import yaml
 from flask import Blueprint, current_app, jsonify, request
 
 from audibleweb.pipeline.queue import cleanup_job_audio
-from audibleweb.config import (
-    ExtractionConfig,
-    FeedConfig,
-    LoggingConfig,
-    NormalizationConfig,
-    PublisherConfig,
-    ServerConfig,
-    TTSConfig,
-    VoiceConfig,
-    load_config,
-)
+from audibleweb.config import apply_settings_patch, strip_secret_settings
 from audibleweb.db import get_connection
 from audibleweb.lib.voice import InvalidVoiceSpecError, parse_voice_spec
 
@@ -337,42 +326,11 @@ def _save_pronunciations(pronunciations: dict[str, str]) -> None:
 
 # --- /api/settings ----------------------------------------------------------------
 
-_SECTION_CLASSES = {
-    "feed": FeedConfig,
-    "voice": VoiceConfig,
-    "tts": TTSConfig,
-    "publisher": PublisherConfig,
-    "extraction": ExtractionConfig,
-    "normalization": NormalizationConfig,
-    "server": ServerConfig,
-    "logging": LoggingConfig,
-}
-
-# Secret fields that live in .env only; never returned or written by this endpoint.
-_SECRET_FIELDS: dict[str, set[str]] = {
-    "publisher": {"token"},
-    "tts": {"api_key"},
-    "extraction": {"jina_api_key"},
-    "normalization": {"llm_api_key"},
-    "server": {"api_key"},
-}
-
-
-def _strip_secrets(settings: dict) -> dict:
-    result = {}
-    for section, values in settings.items():
-        if not isinstance(values, dict):
-            result[section] = values
-            continue
-        secret_keys = _SECRET_FIELDS.get(section, set())
-        result[section] = {k: v for k, v in values.items() if k not in secret_keys}
-    return result
-
 
 @api_bp.get("/settings")
 def get_settings():
     config = current_app.config["APP_CONFIG"]
-    return jsonify(_strip_secrets(dataclasses.asdict(config)))
+    return jsonify(strip_secret_settings(dataclasses.asdict(config)))
 
 
 @api_bp.put("/settings")
@@ -381,35 +339,10 @@ def update_settings():
     if not isinstance(body, dict):
         return jsonify({"error": "request body must be a JSON object"}), 400
 
-    unknown = set(body) - set(_SECTION_CLASSES)
-    if unknown:
-        return jsonify({"error": f"unknown settings sections: {sorted(unknown)}"}), 400
-
-    for section, values in body.items():
-        if not isinstance(values, dict):
-            return jsonify({"error": f"'{section}' must be an object"}), 400
-
-    # Strip secrets before merging — they must not reach config.yaml.
-    body = _strip_secrets(body)
-
-    config_path: Path = current_app.config["CONFIG_PATH"]
-    raw: dict = {}
-    if config_path.exists():
-        raw = yaml.safe_load(config_path.read_text()) or {}
-
-    for section, values in body.items():
-        raw.setdefault(section, {}).update(values)
-
-    # Validate merged sections via dataclass construction (catches unknown fields).
     try:
-        for section, cls in _SECTION_CLASSES.items():
-            if section in raw:
-                cls(**(raw[section] or {}))
-    except TypeError as exc:
-        return jsonify({"error": f"invalid settings: {exc}"}), 400
+        new_config = apply_settings_patch(current_app.config["CONFIG_PATH"], body)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
-    config_path.write_text(yaml.safe_dump(raw, default_flow_style=False))
-    new_config = load_config(config_path=config_path)
     current_app.config["APP_CONFIG"] = new_config
-
-    return jsonify(_strip_secrets(dataclasses.asdict(new_config)))
+    return jsonify(strip_secret_settings(dataclasses.asdict(new_config)))

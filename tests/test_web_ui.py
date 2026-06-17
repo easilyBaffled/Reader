@@ -147,6 +147,30 @@ class TestFeedTab:
         html = resp.data.decode()
         assert "Published Episode" in html
 
+    def test_feed_url_for_local_publisher(self, tmp_path):
+        from audibleweb.app import create_app
+        from audibleweb.config import AppConfig, PublisherConfig, ServerConfig
+
+        config = AppConfig(
+            publisher=PublisherConfig(type="local"),
+            server=ServerConfig(host="127.0.0.1", port=5000),
+        )
+        app = create_app(
+            db_path=tmp_path / "test.db",
+            start_worker=False,
+            tts_engine=_mock_engine(),
+            pronunciation_path=tmp_path / "pronunciation.json",
+            config=config,
+        )
+        _insert_job(
+            app, "ep-local", status="done", public_url="http://127.0.0.1:5000/audio/x.mp3"
+        )
+
+        resp = app.test_client().get("/tab/feed")
+        html = resp.data.decode()
+
+        assert "http://127.0.0.1:5000/feed.xml" in html
+
 
 class TestSettingsTab:
     def test_get_tab_settings_returns_200(self, client):
@@ -162,6 +186,60 @@ class TestSettingsTab:
         resp = client.get("/tab/settings")
         html = resp.data.decode()
         assert "feed-title" in html or "Feed" in html
+
+    def test_save_settings_persists_and_rerenders_form(self, tmp_path):
+        import yaml
+
+        config_path = tmp_path / "config.yaml"
+        app = create_app(
+            db_path=tmp_path / "test.db",
+            start_worker=False,
+            tts_engine=_mock_engine(),
+            pronunciation_path=tmp_path / "pronunciation.json",
+            config_path=config_path,
+        )
+        client = app.test_client()
+
+        resp = client.put(
+            "/web/settings",
+            data={
+                "feed[title]": "New Title",
+                "voice[speed]": "1.5",
+                "tts[max_parallel]": "2",
+            },
+        )
+
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "<form" in html
+        assert "Settings saved." in html
+        assert 'value="New Title"' in html
+        assert 'value="1.5"' in html
+        saved = yaml.safe_load(config_path.read_text())
+        assert saved["feed"]["title"] == "New Title"
+        assert saved["voice"]["speed"] == 1.5
+        assert saved["tts"]["max_parallel"] == 2
+
+    def test_save_settings_invalid_section_shows_error_without_persisting(
+        self, tmp_path
+    ):
+        config_path = tmp_path / "config.yaml"
+        app = create_app(
+            db_path=tmp_path / "test.db",
+            start_worker=False,
+            tts_engine=_mock_engine(),
+            pronunciation_path=tmp_path / "pronunciation.json",
+            config_path=config_path,
+        )
+        client = app.test_client()
+
+        resp = client.put("/web/settings", data={"bogus[field]": "x"})
+
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "<form" in html
+        assert "unknown settings sections" in html.lower()
+        assert not config_path.exists()
 
 
 class TestUnknownTab:

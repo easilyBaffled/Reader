@@ -89,9 +89,7 @@ class WebExtractor:
 def _run_trafilatura(
     html: str, url: str
 ) -> tuple[str | None, str | None, str | None, datetime | None]:
-    result = trafilatura.extract(
-        html, url=url, output_format="python", include_comments=False
-    )
+    result = trafilatura.bare_extraction(html, url=url, include_comments=False)
     if result is None:
         return None, None, None, None
     text = getattr(result, "text", None)

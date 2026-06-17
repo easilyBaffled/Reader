@@ -1,42 +1,35 @@
-feed:
-  title: "My Reading Feed"
-  description: "Articles converted to audio"
-  cover: "cover.jpg"
-
-voice:
-  default: "af_heart"
-  speed: 1.0
-
-tts:
-  engine: kokoro
-  base_url: "http://localhost:8880/v1"
-  max_parallel: 4
-
-publisher:
-  type: github_pages
-  repo: "username/audibleweb-feed"
-  branch: "gh-pages"
-  max_episodes: 0     # 0 = unlimited; set to rotate out oldest episodes
-  max_size_mb: 900    # GitHub Pages recommended limit; 0 = no size check
-
 extraction:
+  jina_api_key: ''
   jina_fallback: true
-  jina_api_key: ""
-  rss_feeds: [] # URLs to poll for new articles
-  rss_poll_interval: 3600 # seconds between polls
-
-normalization:
-  llm_enabled: true
-  llm_base_url: ""
-  llm_model: ""
-
-server:
-  host: "0.0.0.0"
-  port: 5000
-  api_key: ""
-
+  rss_feeds: []
+  rss_poll_interval: 3600
+feed:
+  cover: cover.jpg
+  description: Articles converted to audio
+  title: My Reading Feed
 logging:
-  log_path: "logs/audibleweb.log"
-  log_level: "INFO"
-  max_bytes: 10000000  # 10 MB per rotated file
   backup_count: 5
+  log_level: INFO
+  log_path: logs/audibleweb.log
+  max_bytes: 10000000
+normalization:
+  llm_base_url: ''
+  llm_enabled: true
+  llm_model: ''
+publisher:
+  branch: gh-pages
+  max_episodes: 0
+  max_size_mb: 0
+  repo: ''
+  type: local
+server:
+  api_key: ''
+  host: 0.0.0.0
+  port: 5000
+tts:
+  base_url: http://localhost:8880/v1
+  engine: kokoro
+  max_parallel: 1
+voice:
+  default: af_heart
+  speed: 1.0

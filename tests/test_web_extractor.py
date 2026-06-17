@@ -67,6 +67,27 @@ def test_cannot_handle_file_path():
     assert WebExtractor().can_handle("/path/to/file.txt") is False
 
 
+# --- real trafilatura library (no mocking) -------------------------------------
+# Regression test: existing tests above all patch trafilatura.extract/bare_extraction,
+# which hides bugs in how we actually call the library. This one exercises the real
+# function to catch invalid-argument errors that mocks can't see.
+
+
+def test_extract_against_real_trafilatura_library():
+    real_html = (
+        "<html><head><title>Real Page</title></head><body><article><p>"
+        + ("Some real article content for extraction. " * 10)
+        + "</p></article></body></html>"
+    )
+    client = _client_returning({TARGET_URL: real_html})
+    extractor = WebExtractor(jina_fallback=False, _client=client)
+
+    article = run(extractor.extract(TARGET_URL))
+
+    assert len(article.text) >= 100
+    assert article.source_url == TARGET_URL
+
+
 # --- trafilatura success path -------------------------------------------------
 
 
@@ -75,7 +96,7 @@ def test_extract_trafilatura_success():
     extractor = WebExtractor(jina_fallback=False, _client=client)
     doc = _mock_doc()
 
-    with patch("trafilatura.extract", return_value=doc):
+    with patch("trafilatura.bare_extraction", return_value=doc):
         article = run(extractor.extract(TARGET_URL))
 
     assert article.text == LONG_TEXT.strip()
@@ -91,7 +112,7 @@ def test_extract_trafilatura_no_metadata_uses_derived_title():
     extractor = WebExtractor(jina_fallback=False, _client=client)
     doc = SimpleNamespace(text=LONG_TEXT, title=None, author=None, date=None)
 
-    with patch("trafilatura.extract", return_value=doc):
+    with patch("trafilatura.bare_extraction", return_value=doc):
         article = run(extractor.extract(TARGET_URL))
 
     assert article.title  # derived from first line of LONG_TEXT
@@ -105,7 +126,7 @@ def test_extract_falls_back_to_jina_when_trafilatura_short():
     extractor = WebExtractor(jina_fallback=True, _client=client)
     short_doc = _mock_doc(text=SHORT_TEXT)
 
-    with patch("trafilatura.extract", return_value=short_doc):
+    with patch("trafilatura.bare_extraction", return_value=short_doc):
         article = run(extractor.extract(TARGET_URL))
 
     assert article.text == LONG_TEXT.strip()
@@ -116,7 +137,7 @@ def test_extract_falls_back_to_jina_when_trafilatura_returns_none():
     client = _client_returning({TARGET_URL: FAKE_HTML, JINA_URL: LONG_TEXT})
     extractor = WebExtractor(jina_fallback=True, _client=client)
 
-    with patch("trafilatura.extract", return_value=None):
+    with patch("trafilatura.bare_extraction", return_value=None):
         article = run(extractor.extract(TARGET_URL))
 
     assert LONG_TEXT.strip() in article.text
@@ -134,7 +155,7 @@ def test_extract_jina_sends_api_key_header():
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     extractor = WebExtractor(jina_fallback=True, jina_api_key="mykey", _client=client)
 
-    with patch("trafilatura.extract", return_value=None):
+    with patch("trafilatura.bare_extraction", return_value=None):
         run(extractor.extract(TARGET_URL))
 
     assert any(h.get("authorization") == "Bearer mykey" for h in seen_headers)
@@ -163,7 +184,7 @@ def test_no_content_without_jina_raises_no_extractable_content():
     client = _client_returning({TARGET_URL: FAKE_HTML})
     extractor = WebExtractor(jina_fallback=False, _client=client)
 
-    with patch("trafilatura.extract", return_value=None):
+    with patch("trafilatura.bare_extraction", return_value=None):
         with pytest.raises(ExtractionError, match="No extractable content"):
             run(extractor.extract(TARGET_URL))
 
@@ -177,7 +198,7 @@ def test_both_methods_fail_when_jina_returns_http_error():
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     extractor = WebExtractor(jina_fallback=True, _client=client)
 
-    with patch("trafilatura.extract", return_value=None):
+    with patch("trafilatura.bare_extraction", return_value=None):
         with pytest.raises(
             ExtractionError, match="Extraction failed \\(both methods\\)"
         ):
@@ -188,7 +209,7 @@ def test_both_methods_fail_when_jina_returns_short_content():
     client = _client_returning({TARGET_URL: FAKE_HTML, JINA_URL: SHORT_TEXT})
     extractor = WebExtractor(jina_fallback=True, _client=client)
 
-    with patch("trafilatura.extract", return_value=None):
+    with patch("trafilatura.bare_extraction", return_value=None):
         with pytest.raises(
             ExtractionError, match="Extraction failed \\(both methods\\)"
         ):

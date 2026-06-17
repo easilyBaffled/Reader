@@ -140,3 +140,71 @@ def load_config(
             setattr(getattr(config, section), attr, value)
 
     return config
+
+
+SETTINGS_SECTION_CLASSES: dict[str, type] = {
+    "feed": FeedConfig,
+    "voice": VoiceConfig,
+    "tts": TTSConfig,
+    "publisher": PublisherConfig,
+    "extraction": ExtractionConfig,
+    "normalization": NormalizationConfig,
+    "server": ServerConfig,
+    "logging": LoggingConfig,
+}
+
+# Secret fields that live in .env only; never returned or written by the
+# settings UI/API (docs/design.md sec 8).
+_SECRET_SETTINGS_FIELDS: dict[str, set[str]] = {
+    "publisher": {"token"},
+    "tts": {"api_key"},
+    "extraction": {"jina_api_key"},
+    "normalization": {"llm_api_key"},
+    "server": {"api_key"},
+}
+
+
+def strip_secret_settings(settings: dict) -> dict:
+    """Drop secret fields (tokens/API keys) from a settings dict."""
+    result = {}
+    for section, values in settings.items():
+        if not isinstance(values, dict):
+            result[section] = values
+            continue
+        secret_keys = _SECRET_SETTINGS_FIELDS.get(section, set())
+        result[section] = {k: v for k, v in values.items() if k not in secret_keys}
+    return result
+
+
+def apply_settings_patch(config_path: str | Path, patch: dict) -> AppConfig:
+    """Merge `patch` into config.yaml, validate, persist, and return the reloaded AppConfig.
+
+    Raises ValueError if `patch` references an unknown section, a section's
+    value isn't an object, or a field name within a section is invalid.
+    """
+    unknown = set(patch) - set(SETTINGS_SECTION_CLASSES)
+    if unknown:
+        raise ValueError(f"unknown settings sections: {sorted(unknown)}")
+    for section, values in patch.items():
+        if not isinstance(values, dict):
+            raise ValueError(f"'{section}' must be an object")
+
+    patch = strip_secret_settings(patch)
+
+    config_path = Path(config_path)
+    raw: dict = {}
+    if config_path.exists():
+        raw = yaml.safe_load(config_path.read_text()) or {}
+
+    for section, values in patch.items():
+        raw.setdefault(section, {}).update(values)
+
+    try:
+        for section, cls in SETTINGS_SECTION_CLASSES.items():
+            if section in raw:
+                cls(**(raw[section] or {}))  # validates via dataclass construction
+    except TypeError as exc:
+        raise ValueError(f"invalid settings: {exc}") from exc
+
+    config_path.write_text(yaml.safe_dump(raw, default_flow_style=False))
+    return load_config(config_path=config_path)
