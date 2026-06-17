@@ -459,6 +459,35 @@ body {
   box-shadow: var(--focus-ring);
 }
 
+.voice-blend-builder {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.voice-blend-mode {
+  display: flex;
+  gap: var(--space-base);
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.voice-blend-slots {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.voice-blend-slot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.voice-blend-weight {
+  flex: 1;
+}
+
 /* ── Feed tab ────────────────────────────────────────────────── */
 
 .feed-url-bar {

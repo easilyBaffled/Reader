@@ -14,6 +14,7 @@ from flask import Blueprint, current_app, render_template, request
 from audibleweb.api.routes import _job_to_dict, _validate_voice_config
 from audibleweb.config import SETTINGS_SECTION_CLASSES, apply_settings_patch
 from audibleweb.db import get_connection
+from audibleweb.lib.voice import InvalidVoiceSpecError, VoiceWeight, parse_voice_spec
 
 web_bp = Blueprint(
     "web",
@@ -57,6 +58,23 @@ def index():
     return render_template("index.html", active_tab="queue", jobs=_load_jobs())
 
 
+def _voice_ui_state(default: str) -> tuple[str, list[VoiceWeight]]:
+    """Parse a voice spec string into (mode, voices) for pre-populating the builder.
+
+    Falls back to single-voice mode with the raw string as the voice name if
+    `default` isn't valid spec syntax, so a malformed config.yaml value never
+    crashes the Settings page."""
+    try:
+        spec = parse_voice_spec(default)
+    except InvalidVoiceSpecError:
+        return "single", [VoiceWeight(name=default, weight=1.0)]
+    if spec.type == "weighted":
+        return "weighted", spec.voices
+    if len(spec.voices) == 1:
+        return "single", spec.voices
+    return "native", spec.voices
+
+
 @web_bp.get("/tab/<tab_name>")
 def tab(tab_name: str):
     if tab_name not in _TABS:
@@ -78,7 +96,10 @@ def tab(tab_name: str):
                 else None
             )
     elif tab_name == "settings":
-        ctx["config"] = current_app.config.get("APP_CONFIG")
+        config = current_app.config.get("APP_CONFIG")
+        ctx["config"] = config
+        default_voice = config.voice.default if config else "af_heart"
+        ctx["voice_mode"], ctx["voice_voices"] = _voice_ui_state(default_voice)
 
     return render_template(f"partials/{tab_name}.html", **ctx)
 
@@ -184,17 +205,26 @@ def save_settings():
     try:
         new_config = apply_settings_patch(current_app.config["CONFIG_PATH"], patch)
     except ValueError as exc:
+        config = current_app.config.get("APP_CONFIG")
+        voice_mode, voice_voices = _voice_ui_state(
+            config.voice.default if config else "af_heart"
+        )
         return render_template(
             "partials/settings.html",
             active_tab="settings",
-            config=current_app.config.get("APP_CONFIG"),
+            config=config,
             save_error=str(exc),
+            voice_mode=voice_mode,
+            voice_voices=voice_voices,
         )
 
     current_app.config["APP_CONFIG"] = new_config
+    voice_mode, voice_voices = _voice_ui_state(new_config.voice.default)
     return render_template(
         "partials/settings.html",
         active_tab="settings",
         config=new_config,
         saved=True,
+        voice_mode=voice_mode,
+        voice_voices=voice_voices,
     )

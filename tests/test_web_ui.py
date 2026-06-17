@@ -187,6 +187,93 @@ class TestSettingsTab:
         html = resp.data.decode()
         assert "feed-title" in html or "Feed" in html
 
+    def test_settings_single_voice_default_shows_single_mode(self, tmp_path):
+        from audibleweb.app import create_app
+        from audibleweb.config import AppConfig, VoiceConfig
+
+        config = AppConfig(voice=VoiceConfig(default="af_heart"))
+        app = create_app(
+            db_path=tmp_path / "test.db",
+            start_worker=False,
+            tts_engine=_mock_engine(),
+            pronunciation_path=tmp_path / "pronunciation.json",
+            config=config,
+        )
+
+        resp = app.test_client().get("/tab/settings")
+        html = resp.data.decode()
+
+        assert 'value="single" checked' in html
+        assert 'data-initial="af_heart"' in html
+
+    def test_settings_native_blend_default_shows_native_mode_and_slots(self, tmp_path):
+        from audibleweb.app import create_app
+        from audibleweb.config import AppConfig, VoiceConfig
+
+        config = AppConfig(voice=VoiceConfig(default="af_heart+af_bella"))
+        app = create_app(
+            db_path=tmp_path / "test.db",
+            start_worker=False,
+            tts_engine=_mock_engine(),
+            pronunciation_path=tmp_path / "pronunciation.json",
+            config=config,
+        )
+
+        resp = app.test_client().get("/tab/settings")
+        html = resp.data.decode()
+
+        assert 'value="native" checked' in html
+        assert html.count('class="voice-blend-slot"') == 3
+        assert 'data-initial="af_heart"' in html
+        assert 'data-initial="af_bella"' in html
+
+    def test_settings_weighted_blend_default_shows_weighted_mode_and_weights(
+        self, tmp_path
+    ):
+        from audibleweb.app import create_app
+        from audibleweb.config import AppConfig, VoiceConfig
+
+        config = AppConfig(voice=VoiceConfig(default="af_heart:0.7+af_bella:0.3"))
+        app = create_app(
+            db_path=tmp_path / "test.db",
+            start_worker=False,
+            tts_engine=_mock_engine(),
+            pronunciation_path=tmp_path / "pronunciation.json",
+            config=config,
+        )
+
+        resp = app.test_client().get("/tab/settings")
+        html = resp.data.decode()
+
+        assert 'value="weighted" checked' in html
+        assert 'value="0.7"' in html
+        assert 'value="0.3"' in html
+
+    def test_settings_voice_hidden_field_keeps_field_name(self, client):
+        resp = client.get("/tab/settings")
+        html = resp.data.decode()
+        assert 'name="voice[default]"' in html
+
+    def test_settings_save_native_blend_rerenders_native_mode(self, tmp_path):
+        from audibleweb.app import create_app
+
+        config_path = tmp_path / "config.yaml"
+        app = create_app(
+            db_path=tmp_path / "test.db",
+            start_worker=False,
+            tts_engine=_mock_engine(),
+            pronunciation_path=tmp_path / "pronunciation.json",
+            config_path=config_path,
+        )
+        client = app.test_client()
+
+        resp = client.put("/web/settings", data={"voice[default]": "af_heart+af_bella"})
+
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert 'value="native" checked' in html
+        assert 'data-initial="af_bella"' in html
+
     def test_save_settings_persists_and_rerenders_form(self, tmp_path):
         import yaml
 

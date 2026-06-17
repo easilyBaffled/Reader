@@ -79,3 +79,27 @@
   {{ status }}
 </span>
 {%- endmacro %}
+
+{% macro voice_blend_builder(field_name, spec_string, mode, voices) %}
+{% set slot_count = 1 if mode == 'single' else (2 if mode == 'weighted' else 3) %}
+<div class="voice-blend-builder">
+  <div class="voice-blend-mode">
+    <label><input type="radio" name="{{ field_name }}__mode" value="single" {% if mode == 'single' %}checked{% endif %}> Single</label>
+    <label><input type="radio" name="{{ field_name }}__mode" value="native" {% if mode == 'native' %}checked{% endif %}> Native blend</label>
+    <label><input type="radio" name="{{ field_name }}__mode" value="weighted" {% if mode == 'weighted' %}checked{% endif %}> Weighted blend</label>
+  </div>
+  <div class="voice-blend-slots">
+    {% for i in range(3) %}
+    <div class="voice-blend-slot" {% if i >= slot_count %}style="display:none"{% endif %}>
+      <select class="form-select voice-blend-picker" data-initial="{{ voices[i].name if i < voices|length else '' }}">
+        <option value="{{ voices[i].name if i < voices|length else '' }}">{{ voices[i].name if i < voices|length else '(none)' }}</option>
+      </select>
+      <input type="range" class="voice-blend-weight" min="0" max="1" step="0.01"
+             value="{{ voices[i].weight if i < voices|length else 0.5 }}"
+             {% if mode != 'weighted' %}style="display:none"{% endif %}>
+    </div>
+    {% endfor %}
+  </div>
+  <input type="hidden" class="voice-blend-hidden" name="{{ field_name }}" value="{{ spec_string }}">
+</div>
+{% endmacro %}

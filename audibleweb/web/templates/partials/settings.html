@@ -1,4 +1,4 @@
-{% from 'macros.html' import icon %}
+{% from 'macros.html' import icon, voice_blend_builder %}
 
 {% if saved is defined and saved %}
 <div class="banner banner-success" role="status" id="saved-banner"
@@ -36,10 +36,8 @@
   <section class="settings-section">
     <h2>Voice</h2>
     <div class="form-row">
-      <label class="form-label" for="voice-default">Default voice</label>
-      <input class="form-input" type="text" id="voice-default" name="voice[default]"
-             value="{{ config.voice.default if config else 'af_heart' }}"
-             placeholder="af_heart">
+      <label class="form-label">Default voice</label>
+      {{ voice_blend_builder('voice[default]', config.voice.default if config else 'af_heart', voice_mode, voice_voices) }}
     </div>
     <div class="form-row">
       <label class="form-label" for="voice-speed">Speed (0.5–2.0)</label>
