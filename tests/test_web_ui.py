@@ -281,6 +281,52 @@ class TestCreateJobEndpoint:
         conn.close()
         assert rows[0]["input_type"] == "raw_text"
 
+    def test_post_with_voice_override_stores_voice_config(self, app, client):
+        import json
+
+        resp = client.post(
+            "/web/jobs",
+            data={
+                "input_type": "raw_text",
+                "input_value": "Hello world this is long enough to be a real article body",
+                "voice_config[voice]": "af_heart",
+            },
+        )
+        assert resp.status_code == 200
+        conn = get_connection(app.config["DB_PATH"])
+        row = conn.execute("SELECT voice_config FROM jobs").fetchone()
+        conn.close()
+        assert json.loads(row["voice_config"]) == {"voice": "af_heart"}
+
+    def test_post_without_voice_override_stores_none(self, app, client):
+        resp = client.post(
+            "/web/jobs",
+            data={
+                "input_type": "raw_text",
+                "input_value": "Hello world this is long enough to be a real article body",
+            },
+        )
+        assert resp.status_code == 200
+        conn = get_connection(app.config["DB_PATH"])
+        row = conn.execute("SELECT voice_config FROM jobs").fetchone()
+        conn.close()
+        assert row["voice_config"] is None
+
+    def test_post_with_invalid_voice_override_returns_422(self, app, client):
+        resp = client.post(
+            "/web/jobs",
+            data={
+                "input_type": "raw_text",
+                "input_value": "Hello world this is long enough to be a real article body",
+                "voice_config[voice]": "???",
+            },
+        )
+        assert resp.status_code == 422
+        conn = get_connection(app.config["DB_PATH"])
+        rows = conn.execute("SELECT * FROM jobs").fetchall()
+        conn.close()
+        assert rows == []
+
 
 class TestStaticAssets:
     def test_tokens_css_served(self, client):

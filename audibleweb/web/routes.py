@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import re
 import sqlite3
 import uuid
@@ -10,7 +11,7 @@ from datetime import UTC, datetime
 
 from flask import Blueprint, current_app, render_template, request
 
-from audibleweb.api.routes import _job_to_dict
+from audibleweb.api.routes import _job_to_dict, _validate_voice_config
 from audibleweb.config import SETTINGS_SECTION_CLASSES, apply_settings_patch
 from audibleweb.db import get_connection
 
@@ -103,14 +104,35 @@ def create_job():
     if input_type == "url" and not input_value.startswith(("http://", "https://")):
         input_type = "raw_text"
 
+    voice_value = (request.form.get("voice_config[voice]") or "").strip()
+    voice_config = {"voice": voice_value} if voice_value else None
+    if voice_config is not None:
+        error = _validate_voice_config(voice_config)
+        if error:
+            return (
+                render_template(
+                    "partials/inbox.html",
+                    active_tab="inbox",
+                    error=error,
+                ),
+                422,
+            )
+
     job_id = str(uuid.uuid4())
     now = datetime.now(UTC).isoformat()
     conn = _db()
     try:
         conn.execute(
-            "INSERT INTO jobs (id, status, input_type, input_value, created_at, updated_at)"
-            " VALUES (?, 'queued', ?, ?, ?, ?)",
-            (job_id, input_type, input_value, now, now),
+            "INSERT INTO jobs (id, status, input_type, input_value, voice_config,"
+            " created_at, updated_at) VALUES (?, 'queued', ?, ?, ?, ?, ?)",
+            (
+                job_id,
+                input_type,
+                input_value,
+                json.dumps(voice_config) if voice_config is not None else None,
+                now,
+                now,
+            ),
         )
         conn.commit()
     finally:
