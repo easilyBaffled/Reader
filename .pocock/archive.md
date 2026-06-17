@@ -4,6 +4,26 @@ Older iteration entries moved out of progress.md's rolling window.
 
 ---
 
+### Iteration: reader-whv [ceo-T2] RSS first-sync: mark existing items seen (closed)
+New `audibleweb/migrations/003_rss_seen.sql`. 4 new tests (229 total). No new deps.
+
+Key decisions:
+- `rss_seen_items(feed_url, item_id, seen_at)` — PK (feed_url, item_id). item_id =
+  `entry.id` (guid) → `entry.link` fallback. Entries with neither skipped from tracking
+  (always treated as new — rare edge, spec says entries should have link).
+- `get_seen_item_ids(conn, feed_url) -> set[str]` + `mark_items_seen(conn, feed_url,
+  item_ids)` in `db.py`. `INSERT OR IGNORE` makes mark idempotent.
+- `first_subscribe(feed_url, conn) -> int`: marks ALL current items seen, returns count.
+  Queue wiring (reader-8f2.10) calls this on new feed subscription → 0 jobs created.
+- `list_new_articles(feed_url, conn) -> list[Article]`: skips seen items, marks returned
+  items seen before return. Short/failed entries: ID still marked seen (no retry).
+- `list_articles()` unchanged — existing callers unaffected.
+- test_db.py version assertions bumped 2→3 + added rss_seen_items to table check.
+
+Files: audibleweb/migrations/003_rss_seen.sql (new), audibleweb/db.py (+2 helpers),
+audibleweb/extractors/rss.py (+first_subscribe, +list_new_articles, +_entry_id),
+tests/test_db.py (version bump), tests/test_rss_extractor.py (+4 tests).
+
 ### Iteration: reader-lvy [ceo-T6] Cleanup orphaned audio chunks on delete/final-fail (closed)
 New `audibleweb/pipeline/queue.py`. 2 new tests (199 total). No new deps.
 

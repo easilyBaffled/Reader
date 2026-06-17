@@ -10,6 +10,30 @@ This file maintains context between autonomous iterations.
 <!-- This section is a rolling window - keep only the last 3 entries -->
 <!-- Move older entries to archive.md -->
 
+### Iteration: reader-8f2.10 [build-9] Wire pipeline/queue.py end-to-end (closed)
+`audibleweb/core/pipeline.py` — full pipeline (extract→clean→normalize→chunk→TTS→stitch→publish).
+`audibleweb/pipeline/queue.py` — job_audio_dir, cleanup_job_audio, fail_job helpers.
+`audibleweb/worker.py` — background asyncio worker + heartbeat. 9 new tests (267 total).
+New migration: `004_file_size.sql` (adds `file_size_bytes` col to jobs).
+
+Key decisions:
+- Pipeline lives in `core/pipeline.py` (was a z4v stub); `pipeline/queue.py` holds artifact helpers only.
+- `_synthesize_all` uses `asyncio.gather` for per-chunk parallelism; first exception re-raised.
+- Chunk audio dir cleaned up after stitch (`cleanup_job_audio`) — chunks table keeps status/path
+  until cleanup but audio bytes gone (acceptable; SSE reads from DB not FS).
+- `_predict_url` pre-computes public_url before publish so it can be embedded in feed XML;
+  publisher's returned URL overwrites (authoritative). No extra DB round-trip.
+- `_load_done_episodes` queries jobs table for all done episodes → passed to publish_and_update_feed
+  so feed.xml always has full history, not just current job.
+- TTS failure: `run_pipeline` re-raises; `worker.py._run_with_heartbeat` catches + calls `fail_job`.
+- Pause check: after extract, after normalize, after TTS — three cooperative pause points.
+- `pronunciation.json` added as empty scaffold (app reads it on startup if present).
+
+Files: audibleweb/core/pipeline.py (impl), audibleweb/worker.py (wired),
+audibleweb/pipeline/queue.py (helpers), audibleweb/app.py (worker + pronunciation wiring),
+audibleweb/migrations/004_file_size.sql (new), tests/test_pipeline.py (new, 6 tests),
+tests/test_worker.py (3 tests), tests/test_db.py (version 3→4), pronunciation.json (empty scaffold).
+
 ### Iteration: reader-8f2.11 [build-1c] SSE progress stream (closed)
 New `audibleweb/api/sse.py` blueprint. 7 new tests (261 total). No new deps.
 
@@ -62,26 +86,6 @@ partials/queue.html, partials/inbox.html, partials/feed.html, partials/settings.
 audibleweb/static/css/tokens.css (new, exact from DESIGN.md sec1),
 audibleweb/static/css/app.css (new), audibleweb/app.py (register web_bp),
 tests/test_web_ui.py (new, 25 tests).
-
-### Iteration: reader-whv [ceo-T2] RSS first-sync: mark existing items seen (closed)
-New `audibleweb/migrations/003_rss_seen.sql`. 4 new tests (229 total). No new deps.
-
-Key decisions:
-- `rss_seen_items(feed_url, item_id, seen_at)` — PK (feed_url, item_id). item_id =
-  `entry.id` (guid) → `entry.link` fallback. Entries with neither skipped from tracking
-  (always treated as new — rare edge, spec says entries should have link).
-- `get_seen_item_ids(conn, feed_url) -> set[str]` + `mark_items_seen(conn, feed_url,
-  item_ids)` in `db.py`. `INSERT OR IGNORE` makes mark idempotent.
-- `first_subscribe(feed_url, conn) -> int`: marks ALL current items seen, returns count.
-  Queue wiring (reader-8f2.10) calls this on new feed subscription → 0 jobs created.
-- `list_new_articles(feed_url, conn) -> list[Article]`: skips seen items, marks returned
-  items seen before return. Short/failed entries: ID still marked seen (no retry).
-- `list_articles()` unchanged — existing callers unaffected.
-- test_db.py version assertions bumped 2→3 + added rss_seen_items to table check.
-
-Files: audibleweb/migrations/003_rss_seen.sql (new), audibleweb/db.py (+2 helpers),
-audibleweb/extractors/rss.py (+first_subscribe, +list_new_articles, +_entry_id),
-tests/test_db.py (version bump), tests/test_rss_extractor.py (+4 tests).
 
 ---
 

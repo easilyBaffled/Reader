@@ -72,7 +72,18 @@ def create_app(
         return {"status": "ok"}
 
     if start_worker:
-        worker = Worker(db_path)
+        import json as _json
+
+        pronunciation_file = app.config["PRONUNCIATION_PATH"]
+        pronunciation: dict[str, str] = {}
+        if pronunciation_file.exists():
+            pronunciation = _json.loads(pronunciation_file.read_text())
+        worker = Worker(
+            db_path,
+            config=config,
+            engine=app.extensions["tts_engine"],
+            pronunciation=pronunciation,
+        )
         worker.start()
         app.extensions["worker"] = worker
         atexit.register(worker.stop)

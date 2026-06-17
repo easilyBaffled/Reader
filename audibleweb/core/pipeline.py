@@ -1,17 +1,302 @@
 """Pipeline orchestration: extract -> normalize -> generate -> publish.
 
-Stub for now (reader-z4v): just transitions a queued job to done so the
-worker harness can be built and tested ahead of the real pipeline stages,
-which land in later build tasks (reader-8f2.10 and friends).
+Full implementation (reader-8f2.10), replacing the reader-z4v stub.
+Each stage updates jobs.status so SSE progress stream can report it.
 """
 
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
 import sqlite3
 from datetime import UTC, datetime
+from pathlib import Path
+
+from audibleweb.config import AppConfig
+from audibleweb.core.feed import FeedConfig as CoreFeedConfig
+from audibleweb.engines.base import TTSEngine
+from audibleweb.extractors.file import FileExtractor
+from audibleweb.extractors.raw_text import RawTextExtractor
+from audibleweb.extractors.rss import RSSImportExtractor
+from audibleweb.extractors.web import WebExtractor
+from audibleweb.lib.chunking import chunk_text
+from audibleweb.lib.cleaning import apply_pronunciation_overrides, clean_text
+from audibleweb.pipeline.normalize import normalize_text
+from audibleweb.pipeline.queue import cleanup_job_audio, job_audio_dir
+from audibleweb.pipeline.stitch import stitch_chunks
+from audibleweb.publishers.base import Episode, episode_slug
+from audibleweb.publishers.github_pages import GitHubPagesPublisher
+from audibleweb.publishers.local import LocalPublisher
+
+logger = logging.getLogger(__name__)
 
 
-async def run_pipeline(conn: sqlite3.Connection, job_id: str) -> None:
+class PipelinePausedError(Exception):
+    """Raised cooperatively when the job transitions to 'paused' mid-run."""
+
+
+async def run_pipeline(
+    conn: sqlite3.Connection,
+    job_id: str,
+    *,
+    config: AppConfig,
+    engine: TTSEngine,
+    pronunciation: dict[str, str],
+    data_dir: Path,
+) -> None:
+    row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    voice_cfg = json.loads(row["voice_config"]) if row["voice_config"] else {}
+    voice = voice_cfg.get("voice") or config.voice.default
+    speed = float(voice_cfg.get("speed") or config.voice.speed)
+
+    # --- Stage 1: extracting ---
+    _set_status(conn, job_id, "extracting")
+    extractor = _build_extractor(row["input_type"], config)
+    article = await extractor.extract(row["input_value"])
+    _update_fields(
+        conn,
+        job_id,
+        title=article.title,
+        source_url=article.source_url,
+        word_count=article.word_count,
+    )
+    logger.info("extracted %r (%d words)", article.title, article.word_count)
+
+    _check_paused(conn, job_id)
+
+    # --- Stage 2: normalizing (clean + LLM + pronunciation) ---
+    _set_status(conn, job_id, "normalizing")
+    text = clean_text(article.text)
+    text = await normalize_text(text, config.normalization)
+    text = apply_pronunciation_overrides(text, pronunciation)
+
+    text_chunks = chunk_text(text, level="sentence")
+    _insert_chunk_rows(conn, job_id, text_chunks)
+    logger.info("chunked into %d segments", len(text_chunks))
+
+    _check_paused(conn, job_id)
+
+    # --- Stage 3: generating (parallel TTS) ---
+    _set_status(conn, job_id, "generating")
+    chunk_paths = await _synthesize_all(
+        conn, job_id, text_chunks, engine, voice, speed, data_dir
+    )
+
+    _check_paused(conn, job_id)
+
+    # --- Stage 4: publishing (stitch + publish + feed) ---
+    _set_status(conn, job_id, "publishing")
+    audio_dir = data_dir / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    output_mp3 = audio_dir / f"{job_id}.mp3"
+    duration = await stitch_chunks(chunk_paths, output_mp3)
+    file_size = output_mp3.stat().st_size
+
+    now = datetime.now(UTC)
+    title = (
+        conn.execute("SELECT title FROM jobs WHERE id = ?", (job_id,)).fetchone()[
+            "title"
+        ]
+        or "Untitled"
+    )
+    episode = Episode(
+        title=title,
+        published=now,
+        duration_sec=duration,
+        source_url=article.source_url,
+        file_size_bytes=file_size,
+    )
+
+    publisher = _build_publisher(config, data_dir)
+    episode.public_url = _predict_url(publisher, episode)
+    all_episodes = [episode] + _load_done_episodes(conn)
+
+    public_url, _ = await publisher.publish_and_update_feed(
+        episode, output_mp3, all_episodes
+    )
+    episode.public_url = public_url  # use publisher's returned URL (authoritative)
+
+    cleanup_job_audio(data_dir, job_id)
+
     conn.execute(
-        "UPDATE jobs SET status = 'done', updated_at = ? WHERE id = ?",
-        (datetime.now(UTC).isoformat(), job_id),
+        "UPDATE jobs SET status='done', audio_path=?, public_url=?, "
+        "audio_duration_sec=?, file_size_bytes=?, updated_at=? WHERE id=?",
+        (
+            str(output_mp3),
+            public_url,
+            duration,
+            file_size,
+            datetime.now(UTC).isoformat(),
+            job_id,
+        ),
     )
     conn.commit()
+    logger.info("done: %r -> %s", title, public_url)
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _check_paused(conn: sqlite3.Connection, job_id: str) -> None:
+    row = conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    if row and row["status"] == "paused":
+        raise PipelinePausedError(f"job {job_id} was paused")
+
+
+def _set_status(conn: sqlite3.Connection, job_id: str, status: str) -> None:
+    conn.execute(
+        "UPDATE jobs SET status=?, updated_at=? WHERE id=?",
+        (status, datetime.now(UTC).isoformat(), job_id),
+    )
+    conn.commit()
+
+
+def _update_fields(conn: sqlite3.Connection, job_id: str, **fields) -> None:
+    if not fields:
+        return
+    sets = ", ".join(f"{k}=?" for k in fields)
+    vals = [*fields.values(), datetime.now(UTC).isoformat(), job_id]
+    conn.execute(f"UPDATE jobs SET {sets}, updated_at=? WHERE id=?", vals)
+    conn.commit()
+
+
+def _insert_chunk_rows(
+    conn: sqlite3.Connection, job_id: str, chunks: list[str]
+) -> None:
+    now = datetime.now(UTC).isoformat()
+    conn.executemany(
+        "INSERT OR IGNORE INTO chunks "
+        "(job_id, chunk_index, text, status, created_at, updated_at) "
+        "VALUES (?, ?, ?, 'pending', ?, ?)",
+        [(job_id, i, t, now, now) for i, t in enumerate(chunks)],
+    )
+    conn.commit()
+
+
+async def _synthesize_all(
+    conn: sqlite3.Connection,
+    job_id: str,
+    text_chunks: list[str],
+    engine: TTSEngine,
+    voice: str,
+    speed: float,
+    data_dir: Path,
+) -> list[Path]:
+    chunk_dir = job_audio_dir(data_dir, job_id)
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+
+    async def _synth_one(idx: int, text: str) -> Path:
+        wav_path = chunk_dir / f"chunk_{idx:03d}.wav"
+        try:
+            wav = await engine.synthesize(text, voice, speed)
+            wav_path.write_bytes(wav)
+            conn.execute(
+                "UPDATE chunks SET status='done', audio_path=?, updated_at=? "
+                "WHERE job_id=? AND chunk_index=?",
+                (str(wav_path), datetime.now(UTC).isoformat(), job_id, idx),
+            )
+            conn.commit()
+            logger.debug("chunk %d/%d synthesized", idx + 1, len(text_chunks))
+            return wav_path
+        except Exception as exc:
+            conn.execute(
+                "UPDATE chunks SET status='failed', error=?, updated_at=? "
+                "WHERE job_id=? AND chunk_index=?",
+                (str(exc), datetime.now(UTC).isoformat(), job_id, idx),
+            )
+            conn.commit()
+            raise
+
+    results = await asyncio.gather(
+        *[_synth_one(i, t) for i, t in enumerate(text_chunks)],
+        return_exceptions=True,
+    )
+
+    errors = [r for r in results if isinstance(r, Exception)]
+    if errors:
+        raise errors[0]
+
+    return list(results)  # type: ignore[return-value]
+
+
+def _build_extractor(input_type: str, config: AppConfig):
+    if input_type == "raw_text":
+        return RawTextExtractor()
+    if input_type == "file":
+        return FileExtractor()
+    if input_type == "url":
+        return WebExtractor(
+            jina_fallback=config.extraction.jina_fallback,
+            jina_api_key=config.extraction.jina_api_key,
+        )
+    if input_type == "rss":
+        return RSSImportExtractor()
+    raise ValueError(f"Unknown input_type: {input_type!r}")
+
+
+def _build_publisher(config: AppConfig, data_dir: Path):
+    base_url = f"http://{config.server.host}:{config.server.port}"
+    if config.publisher.type == "local":
+        feed_config = CoreFeedConfig(
+            title=config.feed.title,
+            link=base_url,
+            description=config.feed.description,
+        )
+        return LocalPublisher(data_dir, base_url, feed_config)
+    if config.publisher.type == "github_pages":
+        owner, _, repo_name = config.publisher.repo.partition("/")
+        feed_config = CoreFeedConfig(
+            title=config.feed.title,
+            link=f"https://{owner}.github.io/{repo_name}",
+            description=config.feed.description,
+        )
+        return GitHubPagesPublisher(
+            repo=config.publisher.repo,
+            token=config.publisher.token,
+            work_dir=data_dir / "gh-pages",
+            branch=config.publisher.branch,
+            feed_config=feed_config,
+            max_episodes=config.publisher.max_episodes,
+            max_size_mb=config.publisher.max_size_mb,
+        )
+    raise ValueError(f"Unknown publisher type: {config.publisher.type!r}")
+
+
+def _predict_url(
+    publisher: LocalPublisher | GitHubPagesPublisher, episode: Episode
+) -> str:
+    """Pre-compute URL the publisher will assign so it can be included in feed generation."""
+    slug = episode_slug(episode.title, episode.published)
+    if isinstance(publisher, LocalPublisher):
+        return f"{publisher.base_url}/audio/{slug}.mp3"
+    if isinstance(publisher, GitHubPagesPublisher):
+        return f"{publisher.pages_base_url}/audio/{slug}.mp3"
+    return ""
+
+
+def _load_done_episodes(conn: sqlite3.Connection) -> list[Episode]:
+    rows = conn.execute(
+        "SELECT title, created_at, audio_duration_sec, source_url, public_url, file_size_bytes "
+        "FROM jobs WHERE status='done' AND public_url IS NOT NULL AND public_url != '' "
+        "ORDER BY created_at DESC"
+    ).fetchall()
+    episodes = []
+    for row in rows:
+        try:
+            published = datetime.fromisoformat(row["created_at"])
+        except ValueError:
+            continue
+        episodes.append(
+            Episode(
+                title=row["title"] or "Untitled",
+                published=published,
+                duration_sec=row["audio_duration_sec"] or 0.0,
+                source_url=row["source_url"],
+                public_url=row["public_url"],
+                file_size_bytes=row["file_size_bytes"] or 0,
+            )
+        )
+    return episodes

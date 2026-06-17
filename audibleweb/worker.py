@@ -14,8 +14,10 @@ import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
-from audibleweb.core.pipeline import run_pipeline
+from audibleweb.config import AppConfig
+from audibleweb.core.pipeline import PipelinePausedError, run_pipeline
 from audibleweb.db import get_connection
+from audibleweb.engines.base import TTSEngine
 from audibleweb.log import set_job_id
 from audibleweb.pipeline.queue import fail_job
 
@@ -27,10 +29,19 @@ HEARTBEAT_INTERVAL_SEC = 30.0
 
 class Worker:
     def __init__(
-        self, db_path: str | Path, poll_interval: float = DEFAULT_POLL_INTERVAL_SEC
+        self,
+        db_path: str | Path,
+        poll_interval: float = DEFAULT_POLL_INTERVAL_SEC,
+        *,
+        config: AppConfig | None = None,
+        engine: TTSEngine | None = None,
+        pronunciation: dict[str, str] | None = None,
     ):
         self.db_path = db_path
         self.poll_interval = poll_interval
+        self._config = config
+        self._engine = engine
+        self._pronunciation = pronunciation or {}
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stop_event: asyncio.Event | None = None
@@ -63,11 +74,33 @@ class Worker:
 
         data_dir = Path(self.db_path).parent
         conn = get_connection(self.db_path)
+
+        config = self._config
+        engine = self._engine
+        if config is None or engine is None:
+            from audibleweb.config import load_config
+            from audibleweb.engines.kokoro import KokoroEngine
+
+            config = config or load_config()
+            if engine is None:
+                engine = KokoroEngine(
+                    base_url=config.tts.base_url,
+                    api_key=config.tts.api_key or "not-needed",
+                    max_parallel=config.tts.max_parallel,
+                )
+
         try:
             while not self._stop_event.is_set():
                 job_id = _claim_next_job(conn)
                 if job_id is not None:
-                    await _run_with_heartbeat(conn, job_id, data_dir)
+                    await _run_with_heartbeat(
+                        conn,
+                        job_id,
+                        data_dir,
+                        config=config,
+                        engine=engine,
+                        pronunciation=self._pronunciation,
+                    )
                     continue
                 try:
                     await asyncio.wait_for(
@@ -83,6 +116,10 @@ async def _run_with_heartbeat(
     conn: sqlite3.Connection,
     job_id: str,
     data_dir: Path,
+    *,
+    config: AppConfig,
+    engine: TTSEngine,
+    pronunciation: dict[str, str],
     heartbeat_interval: float = HEARTBEAT_INTERVAL_SEC,
 ) -> None:
     set_job_id(job_id)
@@ -93,12 +130,21 @@ async def _run_with_heartbeat(
             _heartbeat_loop(conn, job_id, heartbeat_interval)
         )
         try:
-            await run_pipeline(conn, job_id)
+            await run_pipeline(
+                conn,
+                job_id,
+                config=config,
+                engine=engine,
+                pronunciation=pronunciation,
+                data_dir=data_dir,
+            )
             logger.info("job done")
         finally:
             heartbeat_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await heartbeat_task
+    except PipelinePausedError:
+        logger.info("job paused")
     except Exception as exc:
         logger.exception("job failed")
         fail_job(conn, job_id, str(exc), data_dir)
