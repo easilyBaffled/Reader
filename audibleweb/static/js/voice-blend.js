@@ -109,8 +109,14 @@
         updateSpec(builder);
       });
     });
-    builder.addEventListener('change', function (e) {
-      if (e.target.classList.contains('voice-blend-picker')) updateSpec(builder);
+    // 'change' alone misses the Kokoro-offline fallback text input: text
+    // inputs only fire 'change' on blur, so typing a voice then submitting
+    // via Enter (no blur) would leave the hidden field stale. 'input' fires
+    // per keystroke and is harmless to also listen for on a <select>.
+    ['change', 'input'].forEach(function (evt) {
+      builder.addEventListener(evt, function (e) {
+        if (e.target.classList.contains('voice-blend-picker')) updateSpec(builder);
+      });
     });
     linkWeightSliders(builder);
   }
