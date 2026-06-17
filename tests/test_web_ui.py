@@ -124,6 +124,13 @@ class TestInboxTab:
         html = resp.data.decode()
         assert "PDF" in html or "drag" in html.lower()
 
+    def test_inbox_contains_voice_override_details(self, client):
+        resp = client.get("/tab/inbox")
+        html = resp.data.decode()
+        assert "<details" in html
+        assert "Override voice for this episode" in html
+        assert 'name="voice_config[voice]"' in html
+
 
 class TestFeedTab:
     def test_get_tab_feed_returns_200(self, client):

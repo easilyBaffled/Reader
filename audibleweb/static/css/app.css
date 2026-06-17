@@ -615,3 +615,13 @@ body {
   font-size: 14px;
   margin-bottom: var(--space-sm);
 }
+
+.voice-override {
+  margin-top: var(--space-sm);
+}
+
+.voice-override summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-muted);
+}

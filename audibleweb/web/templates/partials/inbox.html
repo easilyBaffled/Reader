@@ -1,4 +1,4 @@
-{% from 'macros.html' import icon %}
+{% from 'macros.html' import icon, voice_blend_builder %}
 
 {# Quick-add input #}
 <div class="quick-add">
@@ -13,6 +13,10 @@
            placeholder="Paste a URL, or drop a PDF/TXT/MD file..."
            aria-label="URL or content to convert"
            autofocus>
+    <details class="voice-override">
+      <summary>Override voice for this episode</summary>
+      {{ voice_blend_builder('voice_config[voice]', '', 'single', []) }}
+    </details>
     <button type="submit" class="btn btn-primary">
       {{ icon('upload') }} Add
     </button>
