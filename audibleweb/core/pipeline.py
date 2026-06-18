@@ -25,7 +25,7 @@ from audibleweb.lib.cleaning import apply_pronunciation_overrides, clean_text
 from audibleweb.pipeline.normalize import normalize_text
 from audibleweb.pipeline.queue import cleanup_job_audio, job_audio_dir
 from audibleweb.pipeline.stitch import stitch_chunks
-from audibleweb.publishers.base import Episode, episode_slug
+from audibleweb.publishers.base import Episode
 from audibleweb.publishers.github_pages import GitHubPagesPublisher
 from audibleweb.publishers.local import LocalPublisher
 
@@ -109,13 +109,11 @@ async def run_pipeline(
     )
 
     publisher = _build_publisher(config, data_dir)
-    episode.public_url = _predict_url(publisher, episode)
     all_episodes = [episode] + _load_done_episodes(conn)
 
     public_url, _ = await publisher.publish_and_update_feed(
         episode, output_mp3, all_episodes
     )
-    episode.public_url = public_url  # use publisher's returned URL (authoritative)
 
     cleanup_job_audio(data_dir, job_id)
 
@@ -263,18 +261,6 @@ def _build_publisher(config: AppConfig, data_dir: Path):
             max_size_mb=config.publisher.max_size_mb,
         )
     raise ValueError(f"Unknown publisher type: {config.publisher.type!r}")
-
-
-def _predict_url(
-    publisher: LocalPublisher | GitHubPagesPublisher, episode: Episode
-) -> str:
-    """Pre-compute URL the publisher will assign so it can be included in feed generation."""
-    slug = episode_slug(episode.title, episode.published)
-    if isinstance(publisher, LocalPublisher):
-        return f"{publisher.base_url}/audio/{slug}.mp3"
-    if isinstance(publisher, GitHubPagesPublisher):
-        return f"{publisher.pages_base_url}/audio/{slug}.mp3"
-    return ""
 
 
 def _load_done_episodes(conn: sqlite3.Connection) -> list[Episode]:
