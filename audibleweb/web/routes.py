@@ -318,6 +318,9 @@ def add_feed():
 
 @web_bp.delete("/web/feeds")
 def remove_feed():
+    # Tolerates an absent url (no-op filter) rather than 404ing like
+    # /api/feeds DELETE -- HTMX always re-renders the fragment either way,
+    # and the delete buttons here only ever submit urls already in the list.
     url = request.args.get("url", "")
     config = current_app.config["APP_CONFIG"]
     new_feeds = [f for f in config.extraction.rss_feeds if f != url]
