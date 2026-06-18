@@ -7,6 +7,7 @@ import yaml
 from audibleweb.app import create_app
 from audibleweb.db import get_connection
 from audibleweb.engines.kokoro import KokoroEngine
+from audibleweb.extractors.base import ExtractionError
 
 BASE_URL = "http://mock-tts/v1"
 
@@ -520,3 +521,103 @@ def test_put_settings_invalid_field(settings_app):
     )
 
     assert resp.status_code == 400
+
+
+# --- /api/feeds ----------------------------------------------------------------
+
+
+def test_get_feeds_empty(settings_app):
+    resp = settings_app.test_client().get("/api/feeds")
+
+    assert resp.status_code == 200
+    assert resp.get_json() == {"feeds": []}
+
+
+def test_post_feed_adds_subscribes_and_persists(settings_app, monkeypatch):
+    calls = []
+
+    async def fake_first_subscribe(self, url, conn):
+        calls.append(url)
+        return 5
+
+    monkeypatch.setattr(
+        "audibleweb.api.routes.RSSImportExtractor.first_subscribe",
+        fake_first_subscribe,
+    )
+
+    resp = settings_app.test_client().post(
+        "/api/feeds", json={"url": "http://example.com/rss"}
+    )
+
+    assert resp.status_code == 201
+    body = resp.get_json()
+    assert body["feeds"] == ["http://example.com/rss"]
+    assert body["marked_seen"] == 5
+    assert calls == ["http://example.com/rss"]
+
+    config_path = settings_app.config["CONFIG_PATH"]
+    raw = yaml.safe_load(config_path.read_text())
+    assert raw["extraction"]["rss_feeds"] == ["http://example.com/rss"]
+
+
+def test_post_feed_missing_url(settings_app):
+    resp = settings_app.test_client().post("/api/feeds", json={})
+    assert resp.status_code == 400
+
+
+def test_post_feed_duplicate_rejected(settings_app, monkeypatch):
+    async def fake_first_subscribe(self, url, conn):
+        return 0
+
+    monkeypatch.setattr(
+        "audibleweb.api.routes.RSSImportExtractor.first_subscribe",
+        fake_first_subscribe,
+    )
+    client = settings_app.test_client()
+    client.post("/api/feeds", json={"url": "http://example.com/rss"})
+
+    resp = client.post("/api/feeds", json={"url": "http://example.com/rss"})
+
+    assert resp.status_code == 400
+
+
+def test_post_feed_unreachable_returns_502(settings_app, monkeypatch):
+    async def fake_first_subscribe(self, url, conn):
+        raise ExtractionError("Could not fetch feed: boom")
+
+    monkeypatch.setattr(
+        "audibleweb.api.routes.RSSImportExtractor.first_subscribe",
+        fake_first_subscribe,
+    )
+
+    resp = settings_app.test_client().post(
+        "/api/feeds", json={"url": "http://bad.com/rss"}
+    )
+
+    assert resp.status_code == 502
+    feeds = settings_app.test_client().get("/api/feeds").get_json()
+    assert feeds == {"feeds": []}
+
+
+def test_delete_feed_removes(settings_app, monkeypatch):
+    async def fake_first_subscribe(self, url, conn):
+        return 0
+
+    monkeypatch.setattr(
+        "audibleweb.api.routes.RSSImportExtractor.first_subscribe",
+        fake_first_subscribe,
+    )
+    client = settings_app.test_client()
+    client.post("/api/feeds", json={"url": "http://example.com/rss"})
+
+    resp = client.delete("/api/feeds", json={"url": "http://example.com/rss"})
+
+    assert resp.status_code == 204
+    assert client.get("/api/feeds").get_json() == {"feeds": []}
+
+
+def test_delete_feed_not_found(settings_app):
+    resp = settings_app.test_client().delete(
+        "/api/feeds", json={"url": "http://nope.com/rss"}
+    )
+    assert resp.status_code == 404

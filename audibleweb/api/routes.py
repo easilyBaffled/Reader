@@ -32,6 +32,8 @@ from flask import Blueprint, current_app, jsonify, request
 from audibleweb.pipeline.queue import cleanup_job_audio
 from audibleweb.config import apply_settings_patch, strip_secret_settings
 from audibleweb.db import get_connection
+from audibleweb.extractors.base import ExtractionError
+from audibleweb.extractors.rss import RSSImportExtractor
 from audibleweb.lib.voice import InvalidVoiceSpecError, parse_voice_spec
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
@@ -346,3 +348,66 @@ def update_settings():
 
     current_app.config["APP_CONFIG"] = new_config
     return jsonify(strip_secret_settings(dataclasses.asdict(new_config)))
+
+
+# --- /api/feeds ----------------------------------------------------------------
+
+
+@api_bp.get("/feeds")
+def list_feeds():
+    config = current_app.config["APP_CONFIG"]
+    return jsonify({"feeds": config.extraction.rss_feeds})
+
+
+@api_bp.post("/feeds")
+def add_feed():
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "request body must be a JSON object"}), 400
+
+    url = body.get("url")
+    if not isinstance(url, str) or not url.strip():
+        return jsonify({"error": "'url' is required"}), 400
+    url = url.strip()
+
+    config = current_app.config["APP_CONFIG"]
+    if url in config.extraction.rss_feeds:
+        return jsonify({"error": "feed already subscribed"}), 400
+
+    conn = _db()
+    try:
+        try:
+            seen_count = asyncio.run(RSSImportExtractor().first_subscribe(url, conn))
+        except ExtractionError as exc:
+            return jsonify({"error": str(exc)}), 502
+    finally:
+        conn.close()
+
+    new_feeds = [*config.extraction.rss_feeds, url]
+    new_config = apply_settings_patch(
+        current_app.config["CONFIG_PATH"], {"extraction": {"rss_feeds": new_feeds}}
+    )
+    current_app.config["APP_CONFIG"] = new_config
+    return (
+        jsonify({"feeds": new_config.extraction.rss_feeds, "marked_seen": seen_count}),
+        201,
+    )
+
+
+@api_bp.delete("/feeds")
+def remove_feed():
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "request body must be a JSON object"}), 400
+
+    url = body.get("url")
+    config = current_app.config["APP_CONFIG"]
+    if not isinstance(url, str) or url not in config.extraction.rss_feeds:
+        return jsonify({"error": "feed not found"}), 404
+
+    new_feeds = [f for f in config.extraction.rss_feeds if f != url]
+    new_config = apply_settings_patch(
+        current_app.config["CONFIG_PATH"], {"extraction": {"rss_feeds": new_feeds}}
+    )
+    current_app.config["APP_CONFIG"] = new_config
+    return "", 204
