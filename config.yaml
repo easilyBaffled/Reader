@@ -21,7 +21,7 @@ publisher:
   max_episodes: 0
   max_size_mb: 0
   repo: ''
-  type: local
+  type: github_pages
 server:
   api_key: ''
   host: 0.0.0.0
