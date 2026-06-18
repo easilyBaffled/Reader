@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 import re
@@ -19,6 +20,8 @@ from audibleweb.api.routes import (
 )
 from audibleweb.config import SETTINGS_SECTION_CLASSES, apply_settings_patch
 from audibleweb.db import get_connection
+from audibleweb.extractors.base import ExtractionError
+from audibleweb.extractors.rss import RSSImportExtractor
 from audibleweb.lib.voice import InvalidVoiceSpecError, VoiceWeight, parse_voice_spec
 
 web_bp = Blueprint(
@@ -265,4 +268,64 @@ def delete_pronunciation(word: str):
     return render_template(
         "partials/pronunciation_list.html",
         pronunciations=_load_pronunciations(),
+    )
+
+
+@web_bp.get("/web/feeds")
+def list_feeds():
+    config = current_app.config["APP_CONFIG"]
+    return render_template(
+        "partials/rss_feed_list.html", feeds=config.extraction.rss_feeds
+    )
+
+
+@web_bp.post("/web/feeds")
+def add_feed():
+    url = (request.form.get("url") or "").strip()
+    config = current_app.config["APP_CONFIG"]
+    error = None
+
+    if not url:
+        error = "A feed URL is required."
+    elif url in config.extraction.rss_feeds:
+        error = "That feed is already subscribed."
+    else:
+        conn = _db()
+        try:
+            try:
+                asyncio.run(RSSImportExtractor().first_subscribe(url, conn))
+            except ExtractionError as exc:
+                error = str(exc)
+        finally:
+            conn.close()
+
+    if error:
+        return render_template(
+            "partials/rss_feed_list.html",
+            feeds=config.extraction.rss_feeds,
+            error=error,
+        )
+
+    new_feeds = [*config.extraction.rss_feeds, url]
+    new_config = apply_settings_patch(
+        current_app.config["CONFIG_PATH"], {"extraction": {"rss_feeds": new_feeds}}
+    )
+    current_app.config["APP_CONFIG"] = new_config
+    return render_template(
+        "partials/rss_feed_list.html", feeds=new_config.extraction.rss_feeds
+    )
+
+
+@web_bp.delete("/web/feeds")
+def remove_feed():
+    url = request.args.get("url", "")
+    config = current_app.config["APP_CONFIG"]
+    new_feeds = [f for f in config.extraction.rss_feeds if f != url]
+
+    new_config = apply_settings_patch(
+        current_app.config["CONFIG_PATH"], {"extraction": {"rss_feeds": new_feeds}}
+    )
+    current_app.config["APP_CONFIG"] = new_config
+    return render_template(
+        "partials/rss_feed_list.html", feeds=new_config.extraction.rss_feeds
     )

@@ -610,6 +610,13 @@ body {
   color: var(--text-muted);
 }
 
+.rss-feed-url {
+  flex: 1;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
 .empty-state-inline {
   color: var(--text-muted);
   font-size: 14px;

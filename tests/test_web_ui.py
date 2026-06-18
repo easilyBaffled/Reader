@@ -397,6 +397,79 @@ class TestPronunciationsWebUI:
         assert saved == {}
 
 
+class TestRSSFeedsWebUI:
+    @pytest.fixture
+    def app(self, tmp_path):
+        return create_app(
+            db_path=tmp_path / "test.db",
+            start_worker=False,
+            tts_engine=_mock_engine(),
+            pronunciation_path=tmp_path / "pronunciation.json",
+            config_path=tmp_path / "config.yaml",
+        )
+
+    @pytest.fixture
+    def client(self, app):
+        return app.test_client()
+
+    def test_get_feeds_empty_state(self, client):
+        resp = client.get("/web/feeds")
+        assert resp.status_code == 200
+        assert "no rss feeds" in resp.data.decode().lower()
+
+    def test_post_feed_adds_and_persists(self, app, client, monkeypatch):
+        async def fake_first_subscribe(self, url, conn):
+            return 3
+
+        monkeypatch.setattr(
+            "audibleweb.web.routes.RSSImportExtractor.first_subscribe",
+            fake_first_subscribe,
+        )
+
+        resp = client.post("/web/feeds", data={"url": "http://example.com/rss"})
+
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "http://example.com/rss" in html
+        assert app.config["APP_CONFIG"].extraction.rss_feeds == [
+            "http://example.com/rss"
+        ]
+
+    def test_post_feed_unreachable_shows_error(self, app, client, monkeypatch):
+        from audibleweb.extractors.base import ExtractionError
+
+        async def fake_first_subscribe(self, url, conn):
+            raise ExtractionError("Could not fetch feed: boom")
+
+        monkeypatch.setattr(
+            "audibleweb.web.routes.RSSImportExtractor.first_subscribe",
+            fake_first_subscribe,
+        )
+
+        resp = client.post("/web/feeds", data={"url": "http://bad.com/rss"})
+
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "could not fetch feed" in html.lower()
+        assert app.config["APP_CONFIG"].extraction.rss_feeds == []
+
+    def test_delete_feed_removes_and_persists(self, app, client, monkeypatch):
+        async def fake_first_subscribe(self, url, conn):
+            return 0
+
+        monkeypatch.setattr(
+            "audibleweb.web.routes.RSSImportExtractor.first_subscribe",
+            fake_first_subscribe,
+        )
+        client.post("/web/feeds", data={"url": "http://example.com/rss"})
+
+        resp = client.delete("/web/feeds?url=http://example.com/rss")
+
+        assert resp.status_code == 200
+        assert "http://example.com/rss" not in resp.data.decode()
+        assert app.config["APP_CONFIG"].extraction.rss_feeds == []
+
+
 class TestUnknownTab:
     def test_unknown_tab_returns_404(self, client):
         resp = client.get("/tab/nonexistent")

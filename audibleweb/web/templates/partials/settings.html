@@ -92,6 +92,28 @@
     </div>
   </section>
 
+  <section class="settings-section">
+    <h2>RSS Feeds</h2>
+    <div id="rss-feeds-list"
+         hx-get="/web/feeds"
+         hx-trigger="load"
+         hx-target="this"
+         hx-swap="innerHTML">
+      <div class="skeleton skeleton-row"></div>
+    </div>
+
+    <div class="quick-add" style="margin-top: var(--space-base)">
+      <form class="quick-add-form"
+            hx-post="/web/feeds"
+            hx-target="#rss-feeds-list"
+            hx-swap="innerHTML">
+        <input class="quick-add-input" type="text" name="url"
+               placeholder="https://example.com/feed.xml" aria-label="Feed URL">
+        <button type="submit" class="btn btn-ghost">Subscribe</button>
+      </form>
+    </div>
+  </section>
+
   <div style="margin-top: var(--space-xl)">
     <button type="submit" class="btn btn-primary">
       {{ icon('check-circle') }} Save settings

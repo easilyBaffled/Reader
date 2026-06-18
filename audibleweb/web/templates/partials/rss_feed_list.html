@@ -1,0 +1,25 @@
+{% from 'macros.html' import icon %}
+
+{% if error %}
+<div class="banner banner-error" role="alert">{{ icon('x-circle') }} {{ error }}</div>
+{% endif %}
+
+{% if feeds %}
+<div class="pronunciation-rows">
+  {% for feed_url in feeds %}
+  <div class="pronunciation-row">
+    <span class="rss-feed-url">{{ feed_url }}</span>
+    <button class="btn-icon" type="button"
+            hx-delete="/web/feeds"
+            hx-vals='{"url": "{{ feed_url }}"}'
+            hx-target="#rss-feeds-list"
+            hx-swap="innerHTML"
+            aria-label="Unsubscribe from {{ feed_url }}">
+      {{ icon('delete') }}
+    </button>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="empty-state-inline">No RSS feeds subscribed yet.</p>
+{% endif %}
