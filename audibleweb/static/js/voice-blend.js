@@ -102,7 +102,39 @@
     });
   }
 
+  function previewVoice(name, button) {
+    button.disabled = true;
+    fetch('/api/voices/' + encodeURIComponent(name) + '/sample')
+      .then(function (resp) {
+        if (!resp.ok) throw new Error('sample unavailable');
+        return resp.blob();
+      })
+      .then(function (blob) {
+        var url = URL.createObjectURL(blob);
+        var audio = new Audio(url);
+        audio.addEventListener('ended', function () { URL.revokeObjectURL(url); });
+        return audio.play();
+      })
+      .catch(function () {})
+      .finally(function () {
+        button.disabled = false;
+      });
+  }
+
+  function bindSampleButtons(builder) {
+    all('.voice-blend-sample', builder).forEach(function (button) {
+      button.addEventListener('click', function () {
+        var slot = button.closest('.voice-blend-slot');
+        var field = slot.querySelector('select, input[type="text"]');
+        var name = field ? field.value.trim() : '';
+        if (!name) return;
+        previewVoice(name, button);
+      });
+    });
+  }
+
   function bindEvents(builder) {
+    bindSampleButtons(builder);
     all('input[type="radio"]', builder).forEach(function (radio) {
       radio.addEventListener('change', function () {
         syncSlotVisibility(builder);

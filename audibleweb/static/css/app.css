@@ -178,6 +178,11 @@ body {
   box-shadow: var(--focus-ring);
 }
 
+.btn-icon:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* ── Status badge ────────────────────────────────────────────── */
 
 .badge {
