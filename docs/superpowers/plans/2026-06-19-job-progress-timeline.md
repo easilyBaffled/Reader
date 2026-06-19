@@ -539,7 +539,11 @@ def test_pipeline_logs_permanent_chunk_failure_event(tmp_path):
     migrate(conn)
     _insert_job(
         conn, "job-1",
-        input_value="First sentence here. Second sentence fails badly. Third one too.",
+        input_value=(
+            "This is the first sentence padding out the article content nicely. "
+            "Second sentence absolutely fails badly here today. "
+            "Third sentence wraps things up calmly."
+        ),
     )
 
     class _OneBadChunkEngine:
