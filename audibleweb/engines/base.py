@@ -32,10 +32,15 @@ class TTSEngine(Protocol):
         speed: float = 1.0,
         *,
         check_cancel: Callable[[], Awaitable[None]] | None = None,
+        on_retry: Callable[[int, Exception], None] | None = None,
     ) -> bytes:
         """Synthesize `text` as `voice` (a voice spec string, see lib/voice.py)
         at `speed`. Returns WAV audio bytes. If `check_cancel` is provided it is
-        awaited after synthesis; callers use it for cooperative pause/cancel (D6)."""
+        awaited after synthesis; callers use it for cooperative pause/cancel (D6).
+        If `on_retry` is provided, it's called synchronously with
+        (attempt_number, exception) immediately before each retry backoff
+        sleep -- never on the final, exhausted failure (that path raises
+        instead)."""
         ...
 
     async def list_voices(self) -> list[str]:

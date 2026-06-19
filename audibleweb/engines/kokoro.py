@@ -74,13 +74,16 @@ class KokoroEngine:
         speed: float = 1.0,
         *,
         check_cancel: Callable[[], Awaitable[None]] | None = None,
+        on_retry: Callable[[int, Exception], None] | None = None,
     ) -> bytes:
         spec = parse_voice_spec(voice)
 
         if spec.type == "native":
-            result = await self._generate_with_retry(text, spec.native_string, speed)
+            result = await self._generate_with_retry(
+                text, spec.native_string, speed, on_retry=on_retry
+            )
         else:
-            result = await self._synthesize_weighted(text, spec, speed)
+            result = await self._synthesize_weighted(text, spec, speed, on_retry=on_retry)
 
         if check_cancel is not None:
             await check_cancel()
@@ -88,13 +91,18 @@ class KokoroEngine:
         return result
 
     async def _synthesize_weighted(
-        self, text: str, spec: VoiceSpec, speed: float
+        self,
+        text: str,
+        spec: VoiceSpec,
+        speed: float,
+        *,
+        on_retry: Callable[[int, Exception], None] | None = None,
     ) -> bytes:
         """Synthesize a weighted blend; falls back to the surviving voice if one leg fails."""
         voice_a, voice_b = spec.voices
         raw = await asyncio.gather(
-            self._generate_with_retry(text, voice_a.name, speed),
-            self._generate_with_retry(text, voice_b.name, speed),
+            self._generate_with_retry(text, voice_a.name, speed, on_retry=on_retry),
+            self._generate_with_retry(text, voice_b.name, speed, on_retry=on_retry),
             return_exceptions=True,
         )
         buf_a: bytes | BaseException = raw[0]
@@ -119,7 +127,14 @@ class KokoroEngine:
         response.raise_for_status()
         return response.json()["voices"]
 
-    async def _generate_with_retry(self, text: str, voice: str, speed: float) -> bytes:
+    async def _generate_with_retry(
+        self,
+        text: str,
+        voice: str,
+        speed: float,
+        *,
+        on_retry: Callable[[int, Exception], None] | None = None,
+    ) -> bytes:
         """Generate one voice's audio, retrying with exponential backoff + jitter.
 
         Total attempts: 1 + MAX_RETRIES. Error discrimination: none -- any
@@ -147,6 +162,8 @@ class KokoroEngine:
             except Exception as exc:
                 last_error = exc
                 if attempt < MAX_RETRIES:
+                    if on_retry is not None:
+                        on_retry(attempt, exc)
                     delay = min(BASE_DELAY_SEC * (2**attempt), MAX_DELAY_SEC)
                     await asyncio.sleep(delay + random.uniform(0, 0.1) * delay)
 

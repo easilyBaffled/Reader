@@ -176,6 +176,89 @@ def test_generate_with_retry_raises_after_exhausting_retries():
     assert attempts == 4
 
 
+
+def test_on_retry_called_once_per_failed_attempt():
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            return httpx.Response(500)
+        return httpx.Response(200, content=SILENCE_WAV)
+
+    client = httpx.AsyncClient(
+        base_url=BASE_URL, transport=httpx.MockTransport(handler)
+    )
+    engine = _engine(client)
+
+    calls = []
+    result = run(
+        engine.synthesize(
+            "Hello world", "af_heart", on_retry=lambda attempt, exc: calls.append(attempt)
+        )
+    )
+
+    assert result == SILENCE_WAV
+    assert calls == [0, 1]  # attempts 0 and 1 failed-then-retried; attempt 2 succeeded
+
+
+def test_on_retry_not_called_on_final_exhaustion():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500)
+
+    client = httpx.AsyncClient(
+        base_url=BASE_URL, transport=httpx.MockTransport(handler)
+    )
+    engine = _engine(client)
+
+    calls = []
+    with pytest.raises(KokoroEngineError):
+        run(
+            engine.synthesize(
+                "Hello world", "af_heart", on_retry=lambda attempt, exc: calls.append(attempt)
+            )
+        )
+
+    # 1 initial + 3 retries = 4 attempts total; on_retry fires for the first
+    # 3 failures (attempts 0, 1, 2), not for the 4th (final, exhausted) one.
+    assert calls == [0, 1, 2]
+
+
+def test_on_retry_not_called_on_first_try_success(mock_tts_client):
+    calls = []
+    engine = _engine(mock_tts_client)
+    run(engine.synthesize("Hello world", "af_heart", on_retry=lambda a, e: calls.append(a)))
+    assert calls == []
+
+
+def test_on_retry_called_for_both_legs_of_weighted_blend():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/audio/speech"):
+            voice = json.loads(request.read())["voice"]
+            if voice == "af_bella":
+                return httpx.Response(500)
+            return httpx.Response(200, content=SILENCE_WAV)
+        return httpx.Response(404)
+
+    client = httpx.AsyncClient(
+        base_url=BASE_URL, transport=httpx.MockTransport(handler)
+    )
+    engine = _engine(client)
+
+    calls = []
+    run(
+        engine.synthesize(
+            "Hello", "af_heart:0.6+af_bella:0.4",
+            on_retry=lambda attempt, exc: calls.append(attempt),
+        )
+    )
+
+    # af_bella fails every attempt (1 initial + 3 retries -> on_retry fires
+    # for attempts 0, 1, 2); af_heart succeeds first try -> no on_retry calls.
+    assert calls == [0, 1, 2]
+
+
 # --- WAV header validation (reader-yau) ------------------------------------------
 
 
