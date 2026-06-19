@@ -53,7 +53,10 @@ async def run_pipeline(
 
     # --- Stage 1: extracting ---
     _set_status(conn, job_id, "extracting")
-    _set_detail(conn, job_id, _extracting_detail(row["input_type"], row["input_value"]))
+    _log_event(
+        conn, job_id, "extracting",
+        _extracting_detail(row["input_type"], row["input_value"]),
+    )
     extractor = _build_extractor(row["input_type"], config)
     article = await extractor.extract(row["input_value"])
     _update_fields(
@@ -69,16 +72,16 @@ async def run_pipeline(
 
     # --- Stage 2: normalizing (clean + LLM + pronunciation) ---
     _set_status(conn, job_id, "normalizing")
-    _set_detail(conn, job_id, "Cleaning text")
+    _log_event(conn, job_id, "normalizing", "Cleaning text")
     text = clean_text(article.text)
     norm_cfg = config.normalization
     if norm_cfg.llm_enabled and norm_cfg.llm_base_url.strip() and norm_cfg.llm_model.strip():
-        _set_detail(conn, job_id, f"Normalizing via LLM ({norm_cfg.llm_model})")
+        _log_event(conn, job_id, "normalizing", f"Normalizing via LLM ({norm_cfg.llm_model})")
     text = await normalize_text(text, norm_cfg)
-    _set_detail(conn, job_id, "Applying pronunciation overrides")
+    _log_event(conn, job_id, "normalizing", "Applying pronunciation overrides")
     text = apply_pronunciation_overrides(text, pronunciation)
 
-    _set_detail(conn, job_id, "Splitting into chunks")
+    _log_event(conn, job_id, "normalizing", "Splitting into chunks")
     text_chunks = chunk_text(text, level="sentence")
     _insert_chunk_rows(conn, job_id, text_chunks)
     logger.info("chunked into %d segments", len(text_chunks))
@@ -87,7 +90,7 @@ async def run_pipeline(
 
     # --- Stage 3: generating (parallel TTS) ---
     _set_status(conn, job_id, "generating")
-    _set_detail(conn, job_id, f"Synthesizing {len(text_chunks)} segments")
+    _log_event(conn, job_id, "generating", f"Synthesizing {len(text_chunks)} segments")
     chunk_paths = await _synthesize_all(
         conn, job_id, text_chunks, engine, voice, speed, data_dir
     )
@@ -96,7 +99,7 @@ async def run_pipeline(
 
     # --- Stage 4: publishing (stitch + publish + feed) ---
     _set_status(conn, job_id, "publishing")
-    _set_detail(conn, job_id, "Stitching audio")
+    _log_event(conn, job_id, "publishing", "Stitching audio")
     audio_dir = data_dir / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
     output_mp3 = audio_dir / f"{job_id}.mp3"
@@ -129,7 +132,8 @@ async def run_pipeline(
     )
 
     publisher = _build_publisher(
-        config, data_dir, on_progress=lambda detail: _set_detail(conn, job_id, detail)
+        config, data_dir,
+        on_progress=lambda detail: _log_event(conn, job_id, "publishing", detail),
     )
     all_episodes = [episode] + _load_done_episodes(conn)
 
@@ -166,10 +170,15 @@ def _set_status(conn: sqlite3.Connection, job_id: str, status: str) -> None:
     conn.commit()
 
 
-def _set_detail(conn: sqlite3.Connection, job_id: str, detail: str) -> None:
+def _log_event(conn: sqlite3.Connection, job_id: str, stage: str, detail: str) -> None:
+    now = datetime.now(UTC).isoformat()
     conn.execute(
         "UPDATE jobs SET stage_detail=?, updated_at=? WHERE id=?",
-        (detail, datetime.now(UTC).isoformat(), job_id),
+        (detail, now, job_id),
+    )
+    conn.execute(
+        "INSERT INTO job_events (job_id, stage, detail, created_at) VALUES (?, ?, ?, ?)",
+        (job_id, stage, detail, now),
     )
     conn.commit()
 

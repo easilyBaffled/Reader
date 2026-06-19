@@ -140,6 +140,37 @@ def test_pipeline_chunks_written_to_db(tmp_path):
         assert chunk["audio_path"] is None or True  # audio dir cleaned up after stitch
 
 
+def test_pipeline_logs_job_events_per_stage(tmp_path):
+    db_path = tmp_path / "test.db"
+    conn = get_connection(db_path)
+    migrate(conn)
+    _insert_job(conn, "job-1")
+
+    config = AppConfig(publisher=PublisherConfig(type="local"))
+    run(
+        run_pipeline(
+            conn,
+            "job-1",
+            config=config,
+            engine=_FakeEngine(),
+            pronunciation={},
+            data_dir=tmp_path,
+        )
+    )
+
+    events = conn.execute(
+        "SELECT stage, detail FROM job_events WHERE job_id = ? ORDER BY id", ("job-1",)
+    ).fetchall()
+    stages_seen = [e["stage"] for e in events]
+    assert "extracting" in stages_seen
+    assert "normalizing" in stages_seen
+    assert "generating" in stages_seen
+    assert "publishing" in stages_seen
+    # the extracting detail should mention raw_text's fixed message
+    extracting_details = [e["detail"] for e in events if e["stage"] == "extracting"]
+    assert extracting_details == ["Reading pasted text"]
+
+
 def test_pipeline_pronunciation_applied(tmp_path):
     db_path = tmp_path / "test.db"
     conn = get_connection(db_path)
