@@ -9,8 +9,10 @@ import re
 import sqlite3
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 from flask import Blueprint, current_app, render_template, request
+from werkzeug.utils import secure_filename
 
 from audibleweb.api.routes import (
     _job_to_dict,
@@ -23,6 +25,7 @@ from audibleweb.db import get_connection
 from audibleweb.extractors.base import ExtractionError
 from audibleweb.extractors.rss import RSSImportExtractor
 from audibleweb.lib.voice import InvalidVoiceSpecError, VoiceWeight, parse_voice_spec
+from audibleweb.pipeline.queue import upload_dir
 
 web_bp = Blueprint(
     "web",
@@ -45,7 +48,18 @@ def _load_jobs() -> list[dict]:
     conn = _db()
     try:
         rows = conn.execute("SELECT * FROM jobs ORDER BY created_at DESC").fetchall()
-        return [_job_to_dict(row) for row in rows]
+        jobs = [_job_to_dict(row) for row in rows]
+        for job in jobs:
+            if job["status"] == "generating" or job.get("stalled_stage") == "generating":
+                progress = conn.execute(
+                    "SELECT COUNT(*) AS total,"
+                    " SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done"
+                    " FROM chunks WHERE job_id = ?",
+                    (job["id"],),
+                ).fetchone()
+                job["chunks_total"] = progress["total"] or 0
+                job["chunks_done"] = progress["done"] or 0
+        return jobs
     finally:
         conn.close()
 
@@ -114,10 +128,34 @@ def tab(tab_name: str):
 
 @web_bp.post("/web/jobs")
 def create_job():
+    job_id = str(uuid.uuid4())
     input_value = (request.form.get("input_value") or "").strip()
     input_type = request.form.get("input_type") or "url"
 
-    if not input_value:
+    if input_type not in _INPUT_TYPES:
+        input_type = "url"
+
+    if input_type == "file":
+        upload = request.files.get("file")
+        if upload is None or not upload.filename:
+            return (
+                render_template(
+                    "partials/inbox.html",
+                    active_tab="inbox",
+                    error="A file is required.",
+                ),
+                422,
+            )
+        data_dir = Path(current_app.config["DB_PATH"]).parent
+        dest_dir = upload_dir(data_dir, job_id)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        filename = secure_filename(upload.filename) or (
+            f"upload{Path(upload.filename).suffix.lower()}"
+        )
+        dest_path = dest_dir / filename
+        upload.save(dest_path)
+        input_value = str(dest_path)
+    elif not input_value:
         return (
             render_template(
                 "partials/inbox.html",
@@ -126,9 +164,6 @@ def create_job():
             ),
             422,
         )
-
-    if input_type not in _INPUT_TYPES:
-        input_type = "url"
 
     if input_type == "url" and not input_value.startswith(("http://", "https://")):
         input_type = "raw_text"
@@ -147,7 +182,6 @@ def create_job():
                 422,
             )
 
-    job_id = str(uuid.uuid4())
     now = datetime.now(UTC).isoformat()
     conn = _db()
     try:

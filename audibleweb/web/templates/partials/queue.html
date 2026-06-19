@@ -68,7 +68,7 @@
             <div class="progress-fill" id="progress-fill-{{ job.id }}" style="width: 33%"></div>
           </div>
           <div class="progress-meta">
-            <span id="progress-label-{{ job.id }}">{{ stage_labels.get(job.status, job.status) }}</span>
+            <span id="progress-label-{{ job.id }}">{{ job.stage_detail or stage_labels.get(job.status, job.status) }}</span>
           </div>
         </div>
       </article>
@@ -89,11 +89,13 @@
             var label = document.getElementById("progress-label-" + jobId);
             if (!fill || !label) { es.close(); return; }
             var pct = stageProgress[d.status] || 0;
+            var labelText = d.stage_detail || stageLabels[d.status] || d.status;
             if (d.status === "generating" && d.chunks_total > 0) {
               pct = 30 + Math.round((d.chunks_done / d.chunks_total) * 60);
+              labelText = "Synthesizing audio: segment " + d.chunks_done + "/" + d.chunks_total;
             }
             fill.style.width = pct + "%";
-            label.textContent = stageLabels[d.status] || d.status;
+            label.textContent = labelText;
             if (d.status === "done" || d.status === "failed") {
               es.close();
               htmx.ajax("GET", "/tab/queue", { target: "#main-content", swap: "innerHTML" });
@@ -121,6 +123,12 @@
                 {% if job.error %}
                   <span style="color: var(--error); font-size: 13px;">{{ job.error[:80] }}</span>
                 {% endif %}
+                {% if job.status == 'stalled' %}
+                  <span style="color: var(--error); font-size: 13px;">
+                    stuck in {{ job.stalled_stage }}{% if job.chunks_total %} ({{ job.chunks_done }}/{{ job.chunks_total }} segments){% endif %}
+                    -- no heartbeat for {{ job.stalled_for_sec // 60 }}m {{ job.stalled_for_sec % 60 }}s
+                  </span>
+                {% endif %}
               </div>
             </div>
             <div class="job-actions">
@@ -131,12 +139,19 @@
                   {{ icon('play') }}
                 </a>
               {% endif %}
-              {% if job.status == 'failed' %}
+              {% if job.audio_path %}
+                <a href="/api/jobs/{{ job.id }}/audio" class="btn-icon"
+                   aria-label="Download audio" title="Download audio">
+                  {{ icon('download') }}
+                </a>
+              {% endif %}
+              {% if job.status in ('failed', 'stalled') %}
                 <button class="btn-icon"
                         hx-post="/api/jobs/{{ job.id }}/retry"
                         hx-target="#job-list"
                         hx-swap="outerHTML"
-                        aria-label="Retry job">
+                        aria-label="Retry job"
+                        title="{{ 'Kill and retry' if job.status == 'stalled' else 'Retry' }}">
                   {{ icon('retry') }}
                 </button>
               {% endif %}

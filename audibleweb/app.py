@@ -120,8 +120,19 @@ def main() -> None:
     check_ffmpeg()
     config = load_config()
     setup_logging(config.logging)
-    app = create_app(config=config)
-    app.run(debug=True)
+    # Flask's debug reloader re-execs this whole script in a child process,
+    # but the parent process also runs everything up to app.run() first --
+    # without this guard the worker thread starts in both, so every job gets
+    # claimed and processed twice in parallel (doubling TTS load and
+    # corrupting chunk writes) until the next reload silently orphans it.
+    start_worker = os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+    app = create_app(config=config, start_worker=start_worker)
+    # threaded=True: the Queue tab holds open an SSE connection
+    # (/api/jobs/<id>/stream) for as long as a job is active. Without this,
+    # Werkzeug's dev server handles one connection at a time, so that single
+    # open tab blocks every other request -- including job creation -- until
+    # the job finishes.
+    app.run(debug=True, threaded=True)
 
 
 if __name__ == "__main__":

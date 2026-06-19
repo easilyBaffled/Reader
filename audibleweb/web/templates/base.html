@@ -90,8 +90,13 @@
       fd.append('file', file);
       fd.append('input_type', 'file');
       fd.append('input_value', file.name);
-      htmx.ajax('POST', '/web/jobs', {target: '#main-content', swap: 'innerHTML',
-                                       values: {input_type: 'file', input_value: file.name}});
+      fetch('/web/jobs', {method: 'POST', body: fd})
+        .then((resp) => resp.text())
+        .then((html) => {
+          const main = document.getElementById('main-content');
+          main.innerHTML = html;
+          htmx.process(main);
+        });
     });
 
     // Tab active state update on HTMX swap

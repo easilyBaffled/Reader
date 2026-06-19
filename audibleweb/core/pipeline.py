@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import sqlite3
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -52,6 +53,7 @@ async def run_pipeline(
 
     # --- Stage 1: extracting ---
     _set_status(conn, job_id, "extracting")
+    _set_detail(conn, job_id, _extracting_detail(row["input_type"], row["input_value"]))
     extractor = _build_extractor(row["input_type"], config)
     article = await extractor.extract(row["input_value"])
     _update_fields(
@@ -67,10 +69,16 @@ async def run_pipeline(
 
     # --- Stage 2: normalizing (clean + LLM + pronunciation) ---
     _set_status(conn, job_id, "normalizing")
+    _set_detail(conn, job_id, "Cleaning text")
     text = clean_text(article.text)
-    text = await normalize_text(text, config.normalization)
+    norm_cfg = config.normalization
+    if norm_cfg.llm_enabled and norm_cfg.llm_base_url.strip() and norm_cfg.llm_model.strip():
+        _set_detail(conn, job_id, f"Normalizing via LLM ({norm_cfg.llm_model})")
+    text = await normalize_text(text, norm_cfg)
+    _set_detail(conn, job_id, "Applying pronunciation overrides")
     text = apply_pronunciation_overrides(text, pronunciation)
 
+    _set_detail(conn, job_id, "Splitting into chunks")
     text_chunks = chunk_text(text, level="sentence")
     _insert_chunk_rows(conn, job_id, text_chunks)
     logger.info("chunked into %d segments", len(text_chunks))
@@ -79,6 +87,7 @@ async def run_pipeline(
 
     # --- Stage 3: generating (parallel TTS) ---
     _set_status(conn, job_id, "generating")
+    _set_detail(conn, job_id, f"Synthesizing {len(text_chunks)} segments")
     chunk_paths = await _synthesize_all(
         conn, job_id, text_chunks, engine, voice, speed, data_dir
     )
@@ -87,11 +96,22 @@ async def run_pipeline(
 
     # --- Stage 4: publishing (stitch + publish + feed) ---
     _set_status(conn, job_id, "publishing")
+    _set_detail(conn, job_id, "Stitching audio")
     audio_dir = data_dir / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
     output_mp3 = audio_dir / f"{job_id}.mp3"
     duration = await stitch_chunks(chunk_paths, output_mp3)
     file_size = output_mp3.stat().st_size
+
+    # Persist the stitched mp3's location now, before attempting to publish --
+    # a downstream publish failure (e.g. bad git remote) must not strand an
+    # already-generated episode with no way to retrieve it.
+    conn.execute(
+        "UPDATE jobs SET audio_path=?, audio_duration_sec=?, file_size_bytes=?, "
+        "updated_at=? WHERE id=?",
+        (str(output_mp3), duration, file_size, datetime.now(UTC).isoformat(), job_id),
+    )
+    conn.commit()
 
     now = datetime.now(UTC)
     title = (
@@ -108,7 +128,9 @@ async def run_pipeline(
         file_size_bytes=file_size,
     )
 
-    publisher = _build_publisher(config, data_dir)
+    publisher = _build_publisher(
+        config, data_dir, on_progress=lambda detail: _set_detail(conn, job_id, detail)
+    )
     all_episodes = [episode] + _load_done_episodes(conn)
 
     public_url, _ = await publisher.publish_and_update_feed(
@@ -118,16 +140,8 @@ async def run_pipeline(
     cleanup_job_audio(data_dir, job_id)
 
     conn.execute(
-        "UPDATE jobs SET status='done', audio_path=?, public_url=?, "
-        "audio_duration_sec=?, file_size_bytes=?, updated_at=? WHERE id=?",
-        (
-            str(output_mp3),
-            public_url,
-            duration,
-            file_size,
-            datetime.now(UTC).isoformat(),
-            job_id,
-        ),
+        "UPDATE jobs SET status='done', public_url=?, updated_at=? WHERE id=?",
+        (public_url, datetime.now(UTC).isoformat(), job_id),
     )
     conn.commit()
     logger.info("done: %r -> %s", title, public_url)
@@ -150,6 +164,24 @@ def _set_status(conn: sqlite3.Connection, job_id: str, status: str) -> None:
         (status, datetime.now(UTC).isoformat(), job_id),
     )
     conn.commit()
+
+
+def _set_detail(conn: sqlite3.Connection, job_id: str, detail: str) -> None:
+    conn.execute(
+        "UPDATE jobs SET stage_detail=?, updated_at=? WHERE id=?",
+        (detail, datetime.now(UTC).isoformat(), job_id),
+    )
+    conn.commit()
+
+
+def _extracting_detail(input_type: str, input_value: str) -> str:
+    if input_type == "url":
+        return f"Fetching {input_value}"
+    if input_type == "file":
+        return f"Reading {Path(input_value).name}"
+    if input_type == "rss":
+        return f"Fetching {input_value}"
+    return "Reading pasted text"
 
 
 def _update_fields(conn: sqlite3.Connection, job_id: str, **fields) -> None:
@@ -235,7 +267,12 @@ def _build_extractor(input_type: str, config: AppConfig):
     raise ValueError(f"Unknown input_type: {input_type!r}")
 
 
-def _build_publisher(config: AppConfig, data_dir: Path):
+def _build_publisher(
+    config: AppConfig,
+    data_dir: Path,
+    *,
+    on_progress: Callable[[str], None] | None = None,
+):
     base_url = f"http://{config.server.host}:{config.server.port}"
     if config.publisher.type == "local":
         feed_config = CoreFeedConfig(
@@ -259,6 +296,7 @@ def _build_publisher(config: AppConfig, data_dir: Path):
             feed_config=feed_config,
             max_episodes=config.publisher.max_episodes,
             max_size_mb=config.publisher.max_size_mb,
+            on_progress=on_progress,
         )
     raise ValueError(f"Unknown publisher type: {config.publisher.type!r}")
 

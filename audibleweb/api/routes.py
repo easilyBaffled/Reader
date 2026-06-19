@@ -27,9 +27,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify, request, send_file
+from werkzeug.utils import secure_filename
 
-from audibleweb.pipeline.queue import cleanup_job_audio
+from audibleweb.pipeline.queue import cleanup_job_audio, cleanup_upload
 from audibleweb.config import apply_settings_patch, strip_secret_settings
 from audibleweb.db import get_connection
 from audibleweb.extractors.base import ExtractionError
@@ -58,18 +59,28 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _is_stalled(job: dict) -> bool:
+    """A job whose worker died (process killed/reloaded) mid-stage: status
+    never reaches a terminal value because nothing is left to call fail_job."""
+    if job["status"] not in PIPELINE_STATUSES or not job.get("heartbeat_at"):
+        return False
+    try:
+        last_beat = datetime.fromisoformat(job["heartbeat_at"])
+    except ValueError:
+        return False
+    return datetime.now(UTC) - last_beat > timedelta(seconds=STALL_THRESHOLD_SEC)
+
+
 def _job_to_dict(row: sqlite3.Row) -> dict:
     job = dict(row)
     voice_config = job.get("voice_config")
     job["voice_config"] = json.loads(voice_config) if voice_config else None
 
-    if job["status"] in PIPELINE_STATUSES and job.get("heartbeat_at"):
-        try:
-            last_beat = datetime.fromisoformat(job["heartbeat_at"])
-            if datetime.now(UTC) - last_beat > timedelta(seconds=STALL_THRESHOLD_SEC):
-                job["status"] = "stalled"
-        except ValueError:
-            pass
+    if _is_stalled(job):
+        job["stalled_stage"] = job["status"]
+        last_beat = datetime.fromisoformat(job["heartbeat_at"])
+        job["stalled_for_sec"] = int((datetime.now(UTC) - last_beat).total_seconds())
+        job["status"] = "stalled"
 
     return job
 
@@ -182,6 +193,28 @@ def get_job(job_id: str):
     return jsonify(_job_to_dict(row))
 
 
+@api_bp.get("/jobs/<job_id>/audio")
+def download_job_audio(job_id: str):
+    conn = _db()
+    try:
+        row = _fetch_job(conn, job_id)
+    finally:
+        conn.close()
+
+    if row is None:
+        return jsonify({"error": "job not found"}), 404
+    if not row["audio_path"] or not Path(row["audio_path"]).exists():
+        return jsonify({"error": "audio not available"}), 404
+
+    filename = secure_filename(row["title"] or job_id) or job_id
+    return send_file(
+        row["audio_path"],
+        mimetype="audio/mpeg",
+        as_attachment=True,
+        download_name=f"{filename}.mp3",
+    )
+
+
 @api_bp.delete("/jobs/<job_id>")
 def delete_job(job_id: str):
     conn = _db()
@@ -195,6 +228,7 @@ def delete_job(job_id: str):
 
         data_dir = Path(current_app.config["DB_PATH"]).parent
         cleanup_job_audio(data_dir, job_id)
+        cleanup_upload(data_dir, job_id)
 
         conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
         conn.commit()
@@ -206,9 +240,20 @@ def delete_job(job_id: str):
 
 @api_bp.post("/jobs/<job_id>/retry")
 def retry_job(job_id: str):
-    return _transition(
-        job_id, valid_from={"failed"}, new_status="queued", clear_error=True
-    )
+    conn = _db()
+    try:
+        row = _fetch_job(conn, job_id)
+    finally:
+        conn.close()
+    if row is None:
+        return jsonify({"error": "job not found"}), 404
+
+    # A stalled job's worker died mid-stage, so its DB status is still
+    # whatever pipeline stage it was in, not 'failed' -- accept retry from
+    # that exact stage too, but only once it's actually stalled (heartbeat
+    # stale), so an in-progress job can't be yanked out from under its worker.
+    valid_from = {row["status"]} if _is_stalled(dict(row)) else {"failed"}
+    return _transition(job_id, valid_from=valid_from, new_status="queued", clear_error=True)
 
 
 @api_bp.post("/jobs/<job_id>/pause")
@@ -264,6 +309,13 @@ def _transition(
 
 # --- /api/voices ----------------------------------------------------------------
 
+VOICE_SAMPLE_TEXT = "This is a short preview, so you can hear what this voice sounds like."
+
+# Voice list is static per engine process, so a sample never goes stale --
+# caching avoids re-hitting the TTS engine (often max_parallel=1, so repeat
+# clicks would otherwise queue behind each other) on every preview click.
+_voice_sample_cache: dict[str, bytes] = {}
+
 
 @api_bp.get("/voices")
 def list_voices():
@@ -274,6 +326,22 @@ def list_voices():
         return jsonify({"error": f"TTS engine unreachable: {exc}"}), 502
 
     return jsonify({"voices": voices})
+
+
+@api_bp.get("/voices/<name>/sample")
+def voice_sample(name: str):
+    cached = _voice_sample_cache.get(name)
+    if cached is not None:
+        return Response(cached, mimetype="audio/wav")
+
+    engine = current_app.extensions["tts_engine"]
+    try:
+        audio = asyncio.run(engine.synthesize(VOICE_SAMPLE_TEXT, name))
+    except Exception as exc:
+        return jsonify({"error": f"TTS engine unreachable: {exc}"}), 502
+
+    _voice_sample_cache[name] = audio
+    return Response(audio, mimetype="audio/wav")
 
 
 # --- /api/pronunciations ----------------------------------------------------------------

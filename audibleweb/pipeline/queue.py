@@ -18,6 +18,22 @@ def cleanup_job_audio(data_dir: str | Path, job_id: str) -> None:
         shutil.rmtree(d)
 
 
+def upload_dir(data_dir: str | Path, job_id: str) -> Path:
+    """Per-job directory where uploaded source files (PDF/TXT/MD) are saved.
+
+    Deliberately separate from job_audio_dir: that one is wiped by
+    cleanup_job_audio on every failure (fail_job below), but a retry needs
+    the original source file to still be there."""
+    return Path(data_dir) / "uploads" / job_id
+
+
+def cleanup_upload(data_dir: str | Path, job_id: str) -> None:
+    """Remove the job's uploaded source file directory, if any."""
+    d = upload_dir(data_dir, job_id)
+    if d.exists():
+        shutil.rmtree(d)
+
+
 def fail_job(
     conn: sqlite3.Connection, job_id: str, error: str, data_dir: str | Path
 ) -> None:

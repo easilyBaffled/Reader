@@ -39,6 +39,7 @@ def _progress(db_path, job_id: str) -> dict | None:
             "status": job["status"],
             "title": job["title"],
             "error": job["error"],
+            "stage_detail": job["stage_detail"],
             "chunks_done": chunks_done,
             "chunks_total": chunks_total,
         }

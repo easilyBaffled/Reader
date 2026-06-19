@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 from audibleweb.core.feed import FeedConfig, generate_feed, validate_feed
@@ -40,6 +41,7 @@ class GitHubPagesPublisher:
         remote_url: str | None = None,
         max_episodes: int = 0,
         max_size_mb: int = 0,
+        on_progress: Callable[[str], None] | None = None,
     ):
         self.repo = repo
         self.token = token
@@ -49,8 +51,13 @@ class GitHubPagesPublisher:
         self._remote_url = remote_url or f"https://{token}@github.com/{repo}.git"
         self.max_episodes = max_episodes
         self.max_size_mb = max_size_mb
+        self._on_progress = on_progress
         owner, _, name = repo.partition("/")
         self.pages_base_url = f"https://{owner}.github.io/{name}"
+
+    def _report(self, detail: str) -> None:
+        if self._on_progress:
+            self._on_progress(detail)
 
     async def publish(self, episode: Episode, audio_path: Path) -> str:
         await self._ensure_clone()
@@ -79,6 +86,7 @@ class GitHubPagesPublisher:
     ) -> tuple[str, str]:
         """Atomic: stage MP3 + feed.xml, single commit + single push (reader-ksd)."""
         await self._ensure_clone()
+        self._report("Copying episode audio into repo")
         slug = episode_slug(episode.title, episode.published)
         audio_dir = self.work_dir / "audio"
         audio_dir.mkdir(exist_ok=True)
@@ -86,6 +94,7 @@ class GitHubPagesPublisher:
         episode.public_url = f"{self.pages_base_url}/audio/{slug}.mp3"
         kept_episodes = self._apply_rotation(all_episodes)
         self._check_audio_size()
+        self._report("Regenerating feed.xml")
         xml = generate_feed(kept_episodes, self.feed_config)
         validate_feed(xml)
         (self.work_dir / "feed.xml").write_text(xml, encoding="utf-8")
@@ -128,6 +137,7 @@ class GitHubPagesPublisher:
     async def _ensure_clone(self) -> None:
         if (self.work_dir / ".git").is_dir():
             return
+        self._report(f"Cloning {self.repo} ({self.branch} branch)")
         self.work_dir.mkdir(parents=True, exist_ok=True)
         await self._run_git(
             "clone", "--depth", "1", "--branch", self.branch, self._remote_url, "."
@@ -138,6 +148,7 @@ class GitHubPagesPublisher:
         status = await self._run_git("status", "--porcelain")
         if not status.strip():
             return
+        self._report("Committing changes")
         await self._run_git(
             "-c",
             "user.name=AudibleWeb",
@@ -147,6 +158,7 @@ class GitHubPagesPublisher:
             "-m",
             message,
         )
+        self._report(f"Pushing to {self.repo}")
         await self._run_git("push", "--force", "origin", self.branch)
 
     async def _run_git(self, *args: str) -> str:
