@@ -215,6 +215,25 @@ def download_job_audio(job_id: str):
     )
 
 
+@api_bp.get("/jobs/<job_id>/events")
+def list_job_events(job_id: str):
+    conn = _db()
+    try:
+        row = _fetch_job(conn, job_id)
+        if row is None:
+            return jsonify({"error": "job not found"}), 404
+        events = conn.execute(
+            "SELECT stage, detail, created_at FROM job_events"
+            " WHERE job_id = ? ORDER BY id ASC",
+            (job_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return jsonify({"events": [dict(e) for e in events]})
+
+
+
 @api_bp.delete("/jobs/<job_id>")
 def delete_job(job_id: str):
     conn = _db()

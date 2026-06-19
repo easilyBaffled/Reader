@@ -244,6 +244,42 @@ def test_delete_job_not_found(client):
     assert resp.status_code == 404
 
 
+# --- GET /api/jobs/:id/events ----------------------------------------------------
+
+
+def test_list_job_events_not_found(client):
+    resp = client.get("/api/jobs/missing/events")
+    assert resp.status_code == 404
+
+
+def test_list_job_events_empty_for_job_with_no_events(app, client):
+    _insert_job(app, "job-1")
+    resp = client.get("/api/jobs/job-1/events")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"events": []}
+
+
+def test_list_job_events_returns_ordered_list(app, client):
+    _insert_job(app, "job-1")
+    conn = get_connection(app.config["DB_PATH"])
+    conn.execute(
+        "INSERT INTO job_events (job_id, stage, detail, created_at) VALUES"
+        " ('job-1', 'extracting', 'Reading pasted text', '2026-06-19T00:00:01+00:00'),"
+        " ('job-1', 'normalizing', 'Cleaning text', '2026-06-19T00:00:02+00:00')"
+    )
+    conn.commit()
+    conn.close()
+
+    resp = client.get("/api/jobs/job-1/events")
+
+    assert resp.status_code == 200
+    events = resp.get_json()["events"]
+    assert len(events) == 2
+    assert events[0]["stage"] == "extracting"
+    assert events[0]["detail"] == "Reading pasted text"
+    assert events[1]["stage"] == "normalizing"
+
+
 # --- POST /api/jobs/:id/retry -----------------------------------------------------
 
 
