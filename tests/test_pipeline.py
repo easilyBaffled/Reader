@@ -171,6 +171,149 @@ def test_pipeline_logs_job_events_per_stage(tmp_path):
     assert extracting_details == ["Reading pasted text"]
 
 
+def test_pipeline_logs_permanent_chunk_failure_event(tmp_path):
+    db_path = tmp_path / "test.db"
+    conn = get_connection(db_path)
+    migrate(conn)
+    _insert_job(
+        conn, "job-1",
+        input_value=(
+            "This is the first sentence padding out the article content nicely. "
+            "Second sentence absolutely fails badly here today. "
+            "Third sentence wraps things up calmly."
+        ),
+    )
+
+    class _OneBadChunkEngine:
+        name = "onebad"
+        supports_blending = False
+
+        async def synthesize(self, text: str, voice: str, speed: float = 1.0, **_) -> bytes:
+            if "fails" in text:
+                raise RuntimeError("synthesis exploded")
+            buf = io.BytesIO()
+            with wave.open(buf, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(24000)
+                w.writeframes(b"\x00\x00" * 24000)
+            return buf.getvalue()
+
+    config = AppConfig(publisher=PublisherConfig(type="local"))
+    with pytest.raises(RuntimeError, match="synthesis exploded"):
+        run(
+            run_pipeline(
+                conn, "job-1", config=config, engine=_OneBadChunkEngine(),
+                pronunciation={}, data_dir=tmp_path,
+            )
+        )
+
+    events = conn.execute(
+        "SELECT detail FROM job_events WHERE job_id = ? AND stage = 'generating'"
+        " ORDER BY id",
+        ("job-1",),
+    ).fetchall()
+    failure_events = [e["detail"] for e in events if "failed permanently" in e["detail"]]
+    assert len(failure_events) == 1
+    assert "synthesis exploded" in failure_events[0]
+
+
+def test_format_duration_formats_minutes_and_seconds():
+    from audibleweb.core.pipeline import _format_duration
+
+    assert _format_duration(5) == "5s"
+    assert _format_duration(65) == "1m 5s"
+    assert _format_duration(0) == "0s"
+    assert _format_duration(-3) == "0s"  # clamp, never show negative
+
+
+def test_synthesize_all_counts_retries_into_progress_event(tmp_path):
+    from audibleweb.core.pipeline import _synthesize_all
+
+    db_path = tmp_path / "test.db"
+    conn = get_connection(db_path)
+    migrate(conn)
+    _insert_job(conn, "job-1")
+    now = "2026-06-19T00:00:00+00:00"
+    # 10 chunks -- exactly the throttle floor, guarantees one emitted event.
+    for i in range(10):
+        conn.execute(
+            "INSERT INTO chunks (job_id, chunk_index, text, status, created_at, updated_at)"
+            " VALUES ('job-1', ?, ?, 'pending', ?, ?)",
+            (i, f"chunk {i}", now, now),
+        )
+    conn.commit()
+
+    class _RetryOnceEngine:
+        name = "retryonce"
+        supports_blending = False
+
+        def __init__(self):
+            self.calls = 0
+
+        async def synthesize(self, text, voice, speed=1.0, *, on_retry=None, **_):
+            self.calls += 1
+            if self.calls == 1 and on_retry is not None:
+                on_retry(0, RuntimeError("transient"))
+            buf = io.BytesIO()
+            with wave.open(buf, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(24000)
+                w.writeframes(b"\x00\x00" * 24000)
+            return buf.getvalue()
+
+    run(
+        _synthesize_all(
+            conn, "job-1", [f"chunk {i}" for i in range(10)], _RetryOnceEngine(),
+            "af_heart", 1.0, tmp_path,
+        )
+    )
+
+    events = conn.execute(
+        "SELECT detail FROM job_events WHERE job_id = ? AND stage = 'generating'"
+        " ORDER BY id",
+        ("job-1",),
+    ).fetchall()
+    progress_events = [e["detail"] for e in events if "/10 segments" in e["detail"]]
+    assert len(progress_events) >= 1
+    assert "1 retries" in progress_events[0]
+
+
+def test_synthesize_all_emits_throttled_progress_every_ten_chunks(tmp_path):
+    from audibleweb.core.pipeline import _synthesize_all
+
+    db_path = tmp_path / "test.db"
+    conn = get_connection(db_path)
+    migrate(conn)
+    _insert_job(conn, "job-1")
+    now = "2026-06-19T00:00:00+00:00"
+    chunks = [f"chunk {i}" for i in range(12)]
+    for i, text in enumerate(chunks):
+        conn.execute(
+            "INSERT INTO chunks (job_id, chunk_index, text, status, created_at, updated_at)"
+            " VALUES ('job-1', ?, ?, 'pending', ?, ?)",
+            (i, text, now, now),
+        )
+    conn.commit()
+
+    run(
+        _synthesize_all(
+            conn, "job-1", chunks, _FakeEngine(), "af_heart", 1.0, tmp_path,
+        )
+    )
+
+    events = conn.execute(
+        "SELECT detail FROM job_events WHERE job_id = ? AND stage = 'generating'"
+        " ORDER BY id",
+        ("job-1",),
+    ).fetchall()
+    # 12 chunks, throttle fires every 10 -> at least one "X/12 segments" event
+    progress_events = [e["detail"] for e in events if "/12 segments" in e["detail"]]
+    assert len(progress_events) >= 1
+    assert "remaining" in progress_events[0]
+
+
 def test_pipeline_pronunciation_applied(tmp_path):
     db_path = tmp_path / "test.db"
     conn = get_connection(db_path)

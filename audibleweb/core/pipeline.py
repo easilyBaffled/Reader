@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import sqlite3
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,6 +32,9 @@ from audibleweb.publishers.github_pages import GitHubPagesPublisher
 from audibleweb.publishers.local import LocalPublisher
 
 logger = logging.getLogger(__name__)
+
+PROGRESS_EVERY_CHUNKS = 10
+PROGRESS_EVERY_SEC = 15.0
 
 
 class PipelinePausedError(Exception):
@@ -170,6 +174,14 @@ def _set_status(conn: sqlite3.Connection, job_id: str, status: str) -> None:
     conn.commit()
 
 
+def _format_duration(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    minutes, secs = divmod(seconds, 60)
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
+
+
 def _log_event(conn: sqlite3.Connection, job_id: str, stage: str, detail: str) -> None:
     now = datetime.now(UTC).isoformat()
     conn.execute(
@@ -227,10 +239,37 @@ async def _synthesize_all(
     chunk_dir = job_audio_dir(data_dir, job_id)
     chunk_dir.mkdir(parents=True, exist_ok=True)
 
+    total = len(text_chunks)
+    start = time.monotonic()
+    counts = {"resolved": 0, "retries": 0, "failed": 0}
+    last_emit = {"at": start, "resolved": 0}
+
+    def _maybe_emit_progress() -> None:
+        now = time.monotonic()
+        enough_chunks = counts["resolved"] - last_emit["resolved"] >= PROGRESS_EVERY_CHUNKS
+        enough_time = now - last_emit["at"] >= PROGRESS_EVERY_SEC
+        if not (enough_chunks or enough_time):
+            return
+        elapsed = now - start
+        rate = elapsed / max(counts["resolved"], 1)
+        remaining = rate * (total - counts["resolved"])
+        _log_event(
+            conn, job_id, "generating",
+            f"{counts['resolved']}/{total} segments "
+            f"({counts['retries']} retries, {counts['failed']} failed) -- "
+            f"~{_format_duration(remaining)} remaining",
+        )
+        last_emit["at"] = now
+        last_emit["resolved"] = counts["resolved"]
+
     async def _synth_one(idx: int, text: str) -> Path:
         wav_path = chunk_dir / f"chunk_{idx:03d}.wav"
+
+        def _on_retry(attempt: int, exc: Exception) -> None:
+            counts["retries"] += 1
+
         try:
-            wav = await engine.synthesize(text, voice, speed)
+            wav = await engine.synthesize(text, voice, speed, on_retry=_on_retry)
             wav_path.write_bytes(wav)
             conn.execute(
                 "UPDATE chunks SET status='done', audio_path=?, updated_at=? "
@@ -238,7 +277,9 @@ async def _synthesize_all(
                 (str(wav_path), datetime.now(UTC).isoformat(), job_id, idx),
             )
             conn.commit()
-            logger.debug("chunk %d/%d synthesized", idx + 1, len(text_chunks))
+            counts["resolved"] += 1
+            _maybe_emit_progress()
+            logger.debug("chunk %d/%d synthesized", idx + 1, total)
             return wav_path
         except Exception as exc:
             conn.execute(
@@ -247,6 +288,11 @@ async def _synthesize_all(
                 (str(exc), datetime.now(UTC).isoformat(), job_id, idx),
             )
             conn.commit()
+            counts["resolved"] += 1
+            counts["failed"] += 1
+            _log_event(
+                conn, job_id, "generating", f"chunk {idx} failed permanently: {exc}"
+            )
             raise
 
     results = await asyncio.gather(
