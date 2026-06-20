@@ -337,7 +337,7 @@ body {
 
 .job-timeline-empty {
   list-style: none;
-  padding-left: calc(var(--space-lg) * -1);
+  margin-left: calc(var(--space-lg) * -1);
 }
 
 /* ── Skeleton / loading ──────────────────────────────────────── */
