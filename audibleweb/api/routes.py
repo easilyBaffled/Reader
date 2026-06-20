@@ -233,7 +233,6 @@ def list_job_events(job_id: str):
     return jsonify({"events": [dict(e) for e in events]})
 
 
-
 @api_bp.delete("/jobs/<job_id>")
 def delete_job(job_id: str):
     conn = _db()
@@ -272,7 +271,9 @@ def retry_job(job_id: str):
     # that exact stage too, but only once it's actually stalled (heartbeat
     # stale), so an in-progress job can't be yanked out from under its worker.
     valid_from = {row["status"]} if _is_stalled(dict(row)) else {"failed"}
-    return _transition(job_id, valid_from=valid_from, new_status="queued", clear_error=True)
+    return _transition(
+        job_id, valid_from=valid_from, new_status="queued", clear_error=True
+    )
 
 
 @api_bp.post("/jobs/<job_id>/pause")
@@ -328,7 +329,9 @@ def _transition(
 
 # --- /api/voices ----------------------------------------------------------------
 
-VOICE_SAMPLE_TEXT = "This is a short preview, so you can hear what this voice sounds like."
+VOICE_SAMPLE_TEXT = (
+    "This is a short preview, so you can hear what this voice sounds like."
+)
 
 # Voice list is static per engine process, so a sample never goes stale --
 # caching avoids re-hitting the TTS engine (often max_parallel=1, so repeat
