@@ -1,0 +1,7 @@
+<ul class="job-timeline">
+  {% for event in events %}
+    <li><span class="job-timeline-stage">{{ event.stage }}</span> {{ event.detail }}</li>
+  {% else %}
+    <li class="job-timeline-empty">No timeline yet.</li>
+  {% endfor %}
+</ul>

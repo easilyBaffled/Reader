@@ -30,6 +30,12 @@
     <p>Paste a URL above to create your first episode</p>
   </div>
 {% else %}
+  <script>
+    function toggleJobDetails(jobId) {
+      var ul = document.getElementById("job-timeline-" + jobId);
+      if (ul) ul.hidden = !ul.hidden;
+    }
+  </script>
   <div class="job-list" id="job-list">
     {# Active job (first in-progress job, if any) #}
     {% set active_statuses = ('extracting', 'normalizing', 'generating', 'publishing') %}
@@ -133,6 +139,14 @@
             </div>
             <div class="job-actions">
               {{ status_badge(job.status) }}
+              <button class="btn-icon job-details-toggle"
+                      aria-label="Show details" aria-expanded="false"
+                      hx-get="/web/jobs/{{ job.id }}/events"
+                      hx-target="#job-timeline-{{ job.id }}"
+                      hx-trigger="click once"
+                      onclick="toggleJobDetails('{{ job.id }}')">
+                {{ icon('chevron-down', 16) }}
+              </button>
               {% if job.status == 'done' and job.public_url %}
                 <a href="{{ job.public_url }}" target="_blank" rel="noopener"
                    class="btn-icon" aria-label="Play episode">
@@ -174,6 +188,7 @@
               </button>
             </div>
           </div>
+          <ul class="job-timeline" id="job-timeline-{{ job.id }}" hidden></ul>
         </article>
       {% endif %}
     {% endfor %}

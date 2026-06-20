@@ -208,6 +208,20 @@ def create_job():
     )
 
 
+@web_bp.get("/web/jobs/<job_id>/events")
+def job_events(job_id: str):
+    conn = _db()
+    try:
+        events = conn.execute(
+            "SELECT stage, detail, created_at FROM job_events"
+            " WHERE job_id = ? ORDER BY id ASC",
+            (job_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return render_template("partials/job_events.html", events=events)
+
+
 def _coerce_settings_field(value: str, field_type: object) -> object:
     type_name = field_type if isinstance(field_type, str) else getattr(
         field_type, "__name__", ""

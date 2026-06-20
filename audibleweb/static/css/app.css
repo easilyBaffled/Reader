@@ -317,6 +317,29 @@ body {
   flex-shrink: 0;
 }
 
+.job-timeline {
+  margin: var(--space-sm) 0 0;
+  padding-left: var(--space-lg);
+  font-size: 13px;
+  color: var(--text-muted);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.job-timeline li {
+  padding: 2px 0;
+}
+
+.job-timeline-stage {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.job-timeline-empty {
+  list-style: none;
+  padding-left: calc(var(--space-lg) * -1);
+}
+
 /* ── Skeleton / loading ──────────────────────────────────────── */
 
 @keyframes shimmer {

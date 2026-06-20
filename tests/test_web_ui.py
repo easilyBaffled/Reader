@@ -108,6 +108,38 @@ class TestQueueTab:
         html = resp.data.decode()
         assert "quick-add-input" in html
 
+    def test_queue_compact_row_has_details_toggle(self, app, client):
+        _insert_job(app, "job-fail", status="failed", title="Failed Job")
+        resp = client.get("/tab/queue")
+        html = resp.data.decode()
+        assert "job-details-toggle" in html
+        assert '/web/jobs/job-fail/events' in html
+
+    def test_job_events_endpoint_renders_timeline(self, app, client):
+        from audibleweb.db import get_connection
+
+        _insert_job(app, "job-1", status="done", title="Done Job")
+        conn = get_connection(app.config["DB_PATH"])
+        conn.execute(
+            "INSERT INTO job_events (job_id, stage, detail, created_at) VALUES"
+            " ('job-1', 'extracting', 'Reading pasted text', '2026-06-19T00:00:01+00:00')"
+        )
+        conn.commit()
+        conn.close()
+
+        resp = client.get("/web/jobs/job-1/events")
+
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "job-timeline" in html
+        assert "Reading pasted text" in html
+
+    def test_job_events_endpoint_empty_timeline(self, app, client):
+        _insert_job(app, "job-1", status="queued", title="Queued Job")
+        resp = client.get("/web/jobs/job-1/events")
+        assert resp.status_code == 200
+        assert "No timeline yet" in resp.data.decode()
+
 
 class TestInboxTab:
     def test_get_tab_inbox_returns_200(self, client):
