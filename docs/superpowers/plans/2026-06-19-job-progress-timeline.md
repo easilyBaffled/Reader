@@ -1247,7 +1247,11 @@ Add a `lastDetail` tracking variable right before `es.onmessage = function (e) {
               var timeline = document.getElementById("job-timeline-" + jobId);
               if (timeline) {
                 var li = document.createElement("li");
-                li.innerHTML = '<span class="job-timeline-stage">' + d.status + '</span> ' + d.stage_detail;
+                var stageSpan = document.createElement("span");
+                stageSpan.className = "job-timeline-stage";
+                stageSpan.textContent = d.status;
+                li.appendChild(stageSpan);
+                li.appendChild(document.createTextNode(" " + d.stage_detail));
                 timeline.appendChild(li);
               }
             }
@@ -1258,7 +1262,7 @@ Add a `lastDetail` tracking variable right before `es.onmessage = function (e) {
           };
 ```
 
-Note `d.status` and `d.stage_detail` come from the SSE payload, both already strings controlled by this codebase (not user input), so `innerHTML` here carries no injection risk beyond what already exists in this trusted data path.
+`d.stage_detail` is not trusted: the extracting stage's detail text embeds the user-submitted URL/text verbatim (`_extracting_detail` in `core/pipeline.py`), so it must never be concatenated into `innerHTML`. Build the `<li>` from DOM nodes (`textContent`, not string-built markup) so the dynamic parts can never be interpreted as HTML.
 
 - [ ] **Step 5: Run test to verify it passes**
 
