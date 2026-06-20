@@ -140,6 +140,13 @@ class TestQueueTab:
         assert resp.status_code == 200
         assert "No timeline yet" in resp.data.decode()
 
+    def test_queue_active_job_has_details_toggle_and_timeline_container(self, app, client):
+        _insert_job(app, "job-gen", status="generating", title="Active Job")
+        resp = client.get("/tab/queue")
+        html = resp.data.decode()
+        assert "job-details-toggle" in html
+        assert 'id="job-timeline-job-gen"' in html
+
 
 class TestInboxTab:
     def test_get_tab_inbox_returns_200(self, client):

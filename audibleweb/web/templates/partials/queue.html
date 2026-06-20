@@ -53,6 +53,11 @@
           <div class="job-title">{{ job.title or job.input_value }}</div>
           <div class="job-actions">
             {{ status_badge(job.status) }}
+            <button class="btn-icon job-details-toggle"
+                    aria-label="Show details" aria-expanded="false"
+                    onclick="toggleJobDetails('{{ job.id }}')">
+              {{ icon('chevron-down', 16) }}
+            </button>
             <button class="btn-icon"
                     hx-post="/api/jobs/{{ job.id }}/pause"
                     hx-target="#job-{{ job.id }}"
@@ -77,6 +82,7 @@
             <span id="progress-label-{{ job.id }}">{{ job.stage_detail or stage_labels.get(job.status, job.status) }}</span>
           </div>
         </div>
+        <ul class="job-timeline" id="job-timeline-{{ job.id }}" hidden></ul>
       </article>
       <script>
         (function () {
@@ -89,6 +95,7 @@
           };
           var stageProgress = { extracting: 10, normalizing: 30, generating: 60, publishing: 90 };
           var es = new EventSource("/api/jobs/" + jobId + "/stream");
+          var lastDetail = null;
           es.onmessage = function (e) {
             var d = JSON.parse(e.data);
             var fill = document.getElementById("progress-fill-" + jobId);
@@ -102,6 +109,15 @@
             }
             fill.style.width = pct + "%";
             label.textContent = labelText;
+            if (d.stage_detail && d.stage_detail !== lastDetail) {
+              lastDetail = d.stage_detail;
+              var timeline = document.getElementById("job-timeline-" + jobId);
+              if (timeline) {
+                var li = document.createElement("li");
+                li.innerHTML = '<span class="job-timeline-stage">' + d.status + '</span> ' + d.stage_detail;
+                timeline.appendChild(li);
+              }
+            }
             if (d.status === "done" || d.status === "failed") {
               es.close();
               htmx.ajax("GET", "/tab/queue", { target: "#main-content", swap: "innerHTML" });
