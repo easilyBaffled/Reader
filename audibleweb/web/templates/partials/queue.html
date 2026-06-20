@@ -114,7 +114,11 @@
               var timeline = document.getElementById("job-timeline-" + jobId);
               if (timeline) {
                 var li = document.createElement("li");
-                li.innerHTML = '<span class="job-timeline-stage">' + d.status + '</span> ' + d.stage_detail;
+                var stageSpan = document.createElement("span");
+                stageSpan.className = "job-timeline-stage";
+                stageSpan.textContent = d.status;
+                li.appendChild(stageSpan);
+                li.appendChild(document.createTextNode(" " + d.stage_detail));
                 timeline.appendChild(li);
               }
             }
